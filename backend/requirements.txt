@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+pypdf
+openai
+pydantic
+python-dotenv
+tiktoken
+

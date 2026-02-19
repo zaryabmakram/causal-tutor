@@ -1,0 +1,34 @@
+export interface CitedParagraph {
+  page: number;
+  text: string;
+  aspect: string;
+}
+
+export interface AlternativeMethod {
+  method_name: string;
+  feasibility: string;
+  trade_off: string;
+}
+
+export interface MethodAnalysis {
+  method_name: string;
+  method_selection_summary: string;
+  assumptions: string[];
+  critique: string;
+  result_justification_summary: string;
+  cited_paragraphs: CitedParagraph[];
+}
+
+export interface CausalQueryResponse {
+  paper_name: string;
+  causal_query: string;
+  causal_graph_mermaid: string;
+  methods: MethodAnalysis[];
+  alternative_methods: AlternativeMethod[];
+  suggested_questions: string[];
+}
+
+export interface APIAnalysisResponse {
+    analysis: CausalQueryResponse;
+    full_text: string;
+}

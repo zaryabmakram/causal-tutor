@@ -2,8 +2,9 @@ fastapi
 uvicorn
 python-multipart
 pypdf
-openai
+openai>=1.14.0
 pydantic
 python-dotenv
 tiktoken
+pandas
 

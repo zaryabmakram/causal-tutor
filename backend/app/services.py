@@ -1,12 +1,13 @@
 import io
 import os
 import json
+import pandas as pd
 from typing import List, Optional
 from fastapi import UploadFile
 from pypdf import PdfReader
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-from .models import CausalQueryResponse
+from .models import CausalQueryResponse, DatasetSchema, ExamResponse, ExamQuestion
 
 # Load environment variables FIRST, before initializing the client
 load_dotenv()
@@ -18,6 +19,66 @@ if not api_key:
     print("Warning: OPENAI_API_KEY not found in .env or environment variables.")
 
 client = AsyncOpenAI(api_key=api_key)
+
+async def generate_single_question(method_name: str) -> ExamQuestion:
+    prompt = f"""Generate exactly 1 high-quality multiple-choice exam question to test a student's understanding of the causal method: {method_name}.
+    
+    Focus on:
+    1. Identification assumptions.
+    2. Threats to validity.
+    3. Interpretation of results.
+    
+    Return a JSON object with the question details."""
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "provide_exam_question",
+                "description": "Generates a single exam question.",
+                "parameters": ExamQuestion.model_json_schema()
+            }
+        }
+    ]
+    
+    completion = await client.chat.completions.create(
+        model="gpt-4o-mini", # Fallback to gpt-4o-mini due to SDK versioning issues with gpt-5
+        messages=[{"role": "user", "content": prompt}],
+        tools=tools,
+        tool_choice={"type": "function", "function": {"name": "provide_exam_question"}}
+    )
+    
+    tool_call = completion.choices[0].message.tool_calls[0]
+    return ExamQuestion(**json.loads(tool_call.function.arguments))
+
+async def generate_exam_questions(method_name: str, num_questions: int = 15) -> ExamResponse:
+    # Use asyncio.gather to generate questions in parallel
+    import asyncio
+    
+    # We generate num_questions (default 15) in parallel
+    tasks = [generate_single_question(method_name) for _ in range(num_questions)]
+    questions = await asyncio.gather(*tasks)
+    
+    return ExamResponse(
+        method_name=method_name,
+        questions=list(questions)
+    )
+
+async def extract_csv_schema(file: UploadFile) -> DatasetSchema:
+    contents = await file.read()
+    # Read first 5 rows to get schema and sample
+    df = pd.read_csv(io.BytesIO(contents), nrows=5)
+    
+    headers = df.columns.tolist()
+    types = [str(t) for t in df.dtypes.tolist()]
+    # Convert samples to dict, handling NaNs
+    sample_rows = df.where(pd.notnull(df), None).to_dict(orient='records')
+    
+    return DatasetSchema(
+        headers=headers,
+        types=types,
+        sample_rows=sample_rows
+    )
 
 async def extract_text_from_pdf(file: UploadFile) -> str:
     contents = await file.read()
@@ -74,7 +135,7 @@ async def analyze_paper(text: str, filename: str) -> CausalQueryResponse:
     ]
     
     completion = await client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o", # Fallback to gpt-4o due to SDK versioning issues with gpt-5
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Analyze the following text/paper: {filename}\n\n{text[:100000]}"} 
@@ -84,8 +145,7 @@ async def analyze_paper(text: str, filename: str) -> CausalQueryResponse:
     )
     
     tool_call = completion.choices[0].message.tool_calls[0]
-    function_args = json.loads(tool_call.function.arguments)
-    return CausalQueryResponse(**function_args)
+    return CausalQueryResponse(**json.loads(tool_call.function.arguments))
 
 async def chat_with_paper(paper_text: str, analysis_context: Optional[str], messages: List[dict], model: str = "gpt-4o"):
     system_prompt_content = f"""You are a helpful and Socratic Causal Tutor. Your goal is to help students understand the causal inference methods used in the provided research paper or scenario.
@@ -117,7 +177,7 @@ Instructions for Tutor:
             formatted_messages.append({"role": m["role"], "content": m["content"]})
     
     completion = await client.chat.completions.create(
-        model=model,
+        model=model, # Fallback to gpt-4o
         messages=formatted_messages,
         stream=True
     )

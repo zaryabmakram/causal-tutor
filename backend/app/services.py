@@ -1,12 +1,13 @@
 import io
 import os
 import json
+import pandas as pd
 from typing import List, Optional
 from fastapi import UploadFile
 from pypdf import PdfReader
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-from .models import CausalQueryResponse
+from .models import CausalQueryResponse, DatasetSchema, ExamResponse
 
 # Load environment variables FIRST, before initializing the client
 load_dotenv()
@@ -18,6 +19,55 @@ if not api_key:
     print("Warning: OPENAI_API_KEY not found in .env or environment variables.")
 
 client = AsyncOpenAI(api_key=api_key)
+
+async def generate_exam_questions(method_name: str, num_questions: int = 3) -> ExamResponse:
+    # Use OpenAI to generate questions based on the method
+    prompt = f"""Generate {num_questions} multiple-choice exam questions to test a student's understanding of: {method_name}.
+    
+    Focus on:
+    1. Identification assumptions (e.g., parallel trends, exclusion restriction).
+    2. Threats to validity (e.g., selection bias, reverse causality).
+    3. Interpretation of results.
+    
+    Return a JSON object with a list of questions."""
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "provide_exam_questions",
+                "description": "Generates exam questions for a causal method.",
+                "parameters": ExamResponse.model_json_schema()
+            }
+        }
+    ]
+    
+    completion = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        tools=tools,
+        tool_choice={"type": "function", "function": {"name": "provide_exam_questions"}}
+    )
+    
+    tool_call = completion.choices[0].message.tool_calls[0]
+    function_args = json.loads(tool_call.function.arguments)
+    return ExamResponse(**function_args)
+
+async def extract_csv_schema(file: UploadFile) -> DatasetSchema:
+    contents = await file.read()
+    # Read first 5 rows to get schema and sample
+    df = pd.read_csv(io.BytesIO(contents), nrows=5)
+    
+    headers = df.columns.tolist()
+    types = [str(t) for t in df.dtypes.tolist()]
+    # Convert samples to dict, handling NaNs
+    sample_rows = df.where(pd.notnull(df), None).to_dict(orient='records')
+    
+    return DatasetSchema(
+        headers=headers,
+        types=types,
+        sample_rows=sample_rows
+    )
 
 async def extract_text_from_pdf(file: UploadFile) -> str:
     contents = await file.read()

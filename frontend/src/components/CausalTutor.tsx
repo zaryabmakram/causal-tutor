@@ -618,92 +618,105 @@ export default function CausalTutor() {
 // --- SUB-COMPONENTS ---
 
 function AnalysisReportBlock({ data }: { data: APIAnalysisResponse }) {
+    const [isOpen, setIsOpen] = useState(true);
+
     return (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-500">
             {/* Header */}
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-                <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Analysis Report</span>
+            <div 
+                className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => setIsOpen(!isOpen)}
+            >
+                <div>
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Analysis Report</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 leading-snug">{data.analysis.paper_name || "Scenario Analysis"}</h3>
                 </div>
-                <h3 className="text-lg font-bold text-slate-900 leading-snug">{data.analysis.paper_name || "Scenario Analysis"}</h3>
+                {isOpen ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
             </div>
 
-            {/* Core Query */}
-            <div className="px-6 py-5">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Core Causal Query</h4>
-                <p className="text-sm text-slate-800 font-medium italic border-l-4 border-indigo-500 pl-4 py-1 leading-relaxed bg-slate-50 rounded-r-lg">
-                    {data.analysis.causal_query}
-                </p>
-            </div>
-
-            {/* Methods & Critique (Rich Content moved from Sidebar) */}
-            <div className="px-6 pb-6 space-y-6">
-                {data.analysis.methods.map((method, idx) => (
-                    <div key={idx} className="space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                            <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">{idx + 1}</div>
-                                <span className="font-bold text-slate-800">{method.method_name}</span>
-                            </div>
-                        </div>
-                        
-                        <p className="text-sm text-slate-600 leading-relaxed">
-                            {method.method_selection_summary}
+            {/* Collapsible Content */}
+            {isOpen && (
+                <div className="animate-in slide-in-from-top-2 duration-200">
+                    {/* Core Query */}
+                    <div className="px-6 py-5">
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Core Causal Query</h4>
+                        <p className="text-sm text-slate-800 font-medium italic border-l-4 border-indigo-500 pl-4 py-1 leading-relaxed bg-slate-50 rounded-r-lg">
+                            {data.analysis.causal_query}
                         </p>
+                    </div>
 
-                        {/* Assumptions Grid */}
-                        {method.assumptions && method.assumptions.length > 0 && (
-                            <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Key Assumptions</span>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {method.assumptions.map((ass, i) => (
-                                        <div key={i} className="flex items-start gap-2">
-                                            <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
-                                            <span className="text-xs text-slate-700 leading-tight">{ass}</span>
+                    {/* Methods & Critique (Rich Content moved from Sidebar) */}
+                    <div className="px-6 pb-6 space-y-6">
+                        {data.analysis.methods.map((method, idx) => (
+                            <div key={idx} className="space-y-3">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">{idx + 1}</div>
+                                        <span className="font-bold text-slate-800">{method.method_name}</span>
+                                    </div>
+                                </div>
+                                
+                                <p className="text-sm text-slate-600 leading-relaxed">
+                                    {method.method_selection_summary}
+                                </p>
+
+                                {/* Assumptions Grid */}
+                                {method.assumptions && method.assumptions.length > 0 && (
+                                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Key Assumptions</span>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            {method.assumptions.map((ass, i) => (
+                                                <div key={i} className="flex items-start gap-2">
+                                                    <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                                                    <span className="text-xs text-slate-700 leading-tight">{ass}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Critique Box */}
+                                {method.critique && (
+                                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                                        <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase mb-1">
+                                            <AlertTriangle size={14} /> Critique & Threats
+                                        </div>
+                                        <p className="text-xs text-slate-800 leading-relaxed">
+                                            {method.critique}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+
+                        {/* Alternatives */}
+                        {data.analysis.alternative_methods && data.analysis.alternative_methods.length > 0 && (
+                            <div className="pt-2">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <GitBranch size={16} className="text-pink-500" />
+                                    <span className="font-bold text-sm text-slate-700">Alternative Approaches</span>
+                                </div>
+                                <div className="space-y-2">
+                                    {data.analysis.alternative_methods.map((alt, i) => (
+                                        <div key={i} className="text-xs border-l-2 border-pink-200 pl-3 py-1">
+                                            <span className="font-semibold text-slate-800">{alt.method_name}: </span>
+                                            <span className="text-slate-600">{alt.feasibility}</span>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
-
-                        {/* Critique Box */}
-                        {method.critique && (
-                            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                                <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase mb-1">
-                                    <AlertTriangle size={14} /> Critique & Threats
-                                </div>
-                                <p className="text-xs text-slate-800 leading-relaxed">
-                                    {method.critique}
-                                </p>
-                            </div>
-                        )}
                     </div>
-                ))}
-
-                {/* Alternatives */}
-                {data.analysis.alternative_methods && data.analysis.alternative_methods.length > 0 && (
-                    <div className="pt-2">
-                        <div className="flex items-center gap-2 mb-3">
-                            <GitBranch size={16} className="text-pink-500" />
-                            <span className="font-bold text-sm text-slate-700">Alternative Approaches</span>
-                        </div>
-                        <div className="space-y-2">
-                            {data.analysis.alternative_methods.map((alt, i) => (
-                                <div key={i} className="text-xs border-l-2 border-pink-200 pl-3 py-1">
-                                    <span className="font-semibold text-slate-800">{alt.method_name}: </span>
-                                    <span className="text-slate-600">{alt.feasibility}</span>
-                                </div>
-                            ))}
-                        </div>
+                    
+                    {/* Footer / CTA */}
+                    <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 text-[11px] text-slate-500 flex justify-between items-center">
+                        <span>Generated by Causal Tutor AI</span>
+                        <span className="flex items-center gap-1"><BrainCircuit size={12} /> Pro Analysis</span>
                     </div>
-                )}
-            </div>
-            
-            {/* Footer / CTA */}
-            <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 text-[11px] text-slate-500 flex justify-between items-center">
-                <span>Generated by Causal Tutor AI</span>
-                <span className="flex items-center gap-1"><BrainCircuit size={12} /> Pro Analysis</span>
-            </div>
+                </div>
+            )}
         </div>
     );
 }

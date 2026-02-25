@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -6,8 +6,9 @@ from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 
-from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest
-from .services import analyze_paper, extract_text_from_pdf, chat_with_paper
+from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest, ResearchProject, ExamResponse
+from .services import analyze_paper, extract_text_from_pdf, extract_csv_schema, chat_with_paper, generate_exam_questions
+from .curriculum_data import CURRICULUM_METHODS
 
 load_dotenv()
 
@@ -25,6 +26,66 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Causal Tutor API is running"}
+
+@app.get("/curriculum-methods")
+async def get_curriculum_methods():
+    return CURRICULUM_METHODS
+
+@app.post("/generate-exam", response_model=ExamResponse)
+async def generate_exam_endpoint(method_name: str):
+    try:
+        exam = await generate_exam_questions(method_name)
+        return exam
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-project")
+async def analyze_project_endpoint(
+    rq_text: str = Form(...),
+    pdf_file: Optional[UploadFile] = File(None),
+    csv_file: Optional[UploadFile] = File(None)
+):
+    try:
+        # 1. Process PDF if present
+        pdf_text = None
+        if pdf_file and pdf_file.filename.endswith(".pdf"):
+            pdf_text = await extract_text_from_pdf(pdf_file)
+        
+        # 2. Process CSV if present
+        dataset_schema = None
+        if csv_file and csv_file.filename.endswith(".csv"):
+            dataset_schema = await extract_csv_schema(csv_file)
+            
+        # 3. Construct Synthesis Prompt for Analysis
+        # We combine RQ + PDF Text + Dataset Schema into one context
+        synthesis_text = f"Research Question: {rq_text}\n\n"
+        
+        if dataset_schema:
+            synthesis_text += f"Available Dataset Schema:\nHeaders: {dataset_schema.headers}\nSample Data: {dataset_schema.sample_rows}\n\n"
+            
+        if pdf_text:
+            synthesis_text += f"Reference Paper Content:\n{pdf_text[:50000]}" # Limit context
+        
+        # 4. Run Analysis
+        analysis = await analyze_paper(synthesis_text, "Research Design Project")
+        
+        return {
+            "project": {
+                "rq_text": rq_text,
+                "pdf_text": pdf_text,
+                "dataset_schema": dataset_schema,
+                "analysis": analysis
+            },
+            "analysis": analysis,
+            "full_text": synthesis_text
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze", response_model=APIAnalysisResponse)
 async def analyze_endpoint(file: UploadFile = File(...)):

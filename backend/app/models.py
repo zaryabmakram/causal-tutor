@@ -27,6 +27,27 @@ class CausalQueryResponse(BaseModel):
     alternative_methods: List[AlternativeMethod] = Field(description="List of 2-3 alternative methods that could be applicable to this research question")
     suggested_questions: List[str] = Field(description="3-4 educational follow-up questions for a student")
 
+class DatasetSchema(BaseModel):
+    headers: List[str]
+    types: List[str]
+    sample_rows: List[dict]
+
+class ResearchProject(BaseModel):
+    rq_text: str
+    pdf_text: Optional[str] = None
+    dataset_schema: Optional[DatasetSchema] = None
+    analysis: Optional[CausalQueryResponse] = None
+
+class ExamQuestion(BaseModel):
+    question_text: str
+    options: List[str]
+    correct_option_index: int
+    explanation: str
+
+class ExamResponse(BaseModel):
+    method_name: str
+    questions: List[ExamQuestion]
+
 class APIAnalysisResponse(BaseModel):
     analysis: CausalQueryResponse
     full_text: str

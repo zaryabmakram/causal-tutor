@@ -16,6 +16,7 @@ export default function CurriculumDashboard() {
     const [showResult, setShowResult] = useState(false);
     const [loadingExam, setLoadingExam] = useState<string | null>(null);
     const [loadingTheory, setLoadingTheory] = useState(true);
+    const [numQuestions, setNumQuestions] = useState<number>(5); // User can select number of questions
 
     useEffect(() => {
         const fetchMethods = async () => {
@@ -47,7 +48,7 @@ export default function CurriculumDashboard() {
     const startExam = async (methodId: string, methodTitle: string) => {
         setLoadingExam(methodId);
         try {
-            const res = await fetch(`http://localhost:8000/generate-exam?method_name=${methodTitle}`, { method: "POST" });
+            const res = await fetch(`http://localhost:8000/generate-exam?method_name=${methodTitle}&num_questions=${numQuestions}`, { method: "POST" });
             const data = await res.json();
             setExamQuestions(data.questions);
             setViewMode("exam");
@@ -139,12 +140,28 @@ export default function CurriculumDashboard() {
                         </button>
                         <h2 className="text-xl font-bold text-slate-900">{selectedMethod.title}</h2>
                     </div>
-                    <button 
-                        onClick={() => startExam(selectedMethod.id, selectedMethod.title)}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2"
-                    >
-                        <PlayCircle size={16} /> Take Exam
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                            <span className="text-xs font-semibold text-slate-500">Length:</span>
+                            <select 
+                                value={numQuestions}
+                                onChange={(e) => setNumQuestions(Number(e.target.value))}
+                                className="bg-transparent border-none text-slate-700 text-sm focus:ring-0 p-0 outline-none cursor-pointer"
+                            >
+                                <option value={3}>3 Qs</option>
+                                <option value={5}>5 Qs</option>
+                                <option value={10}>10 Qs</option>
+                                <option value={15}>15 Qs</option>
+                                <option value={20}>20 Qs</option>
+                            </select>
+                        </div>
+                        <button 
+                            onClick={() => startExam(selectedMethod.id, selectedMethod.title)}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                        >
+                            <PlayCircle size={16} /> Take Exam
+                        </button>
+                    </div>
                 </header>
 
                 <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
@@ -213,12 +230,29 @@ export default function CurriculumDashboard() {
 
     return (
         <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
-            <header className="px-8 py-6 bg-white border-b border-slate-200 shadow-sm z-10">
-                <div className="flex items-center gap-3 mb-2">
-                    <BookOpen className="text-indigo-600" size={24} />
-                    <h1 className="text-2xl font-bold text-slate-900">Causality Curriculum</h1>
+            <header className="px-8 py-6 bg-white border-b border-slate-200 shadow-sm z-10 flex items-center justify-between">
+                <div>
+                    <div className="flex items-center gap-3 mb-2">
+                        <BookOpen className="text-indigo-600" size={24} />
+                        <h1 className="text-2xl font-bold text-slate-900">Causality Curriculum</h1>
+                    </div>
+                    <p className="text-slate-500">Master the 10 core methods of causal inference through theory and interactive exams.</p>
                 </div>
-                <p className="text-slate-500">Master the 10 core methods of causal inference through theory and interactive exams.</p>
+                
+                <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                    <span className="text-sm font-semibold text-slate-600">Exam Length:</span>
+                    <select 
+                        value={numQuestions}
+                        onChange={(e) => setNumQuestions(Number(e.target.value))}
+                        className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2 outline-none cursor-pointer"
+                    >
+                        <option value={3}>3 Questions</option>
+                        <option value={5}>5 Questions</option>
+                        <option value={10}>10 Questions</option>
+                        <option value={15}>15 Questions</option>
+                        <option value={20}>20 Questions</option>
+                    </select>
+                </div>
             </header>
 
             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">

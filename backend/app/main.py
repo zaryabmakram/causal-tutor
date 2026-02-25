@@ -32,9 +32,9 @@ async def get_curriculum_methods():
     return CURRICULUM_METHODS
 
 @app.post("/generate-exam", response_model=ExamResponse)
-async def generate_exam_endpoint(method_name: str):
+async def generate_exam_endpoint(method_name: str, num_questions: int = 5):
     try:
-        exam = await generate_exam_questions(method_name)
+        exam = await generate_exam_questions(method_name, num_questions)
         return exam
     except Exception as e:
         import traceback

@@ -9,6 +9,14 @@ from dotenv import load_dotenv
 from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest, ResearchProject, ExamResponse
 from .services import analyze_paper, extract_text_from_pdf, extract_csv_schema, chat_with_paper, generate_exam_questions
 from .curriculum_data import CURRICULUM_METHODS
+from .dag_models import (
+    DAGValidateRequest, DAGValidateResponse,
+    DSeparationRequest, DSeparationResponse,
+    PathsRequest, PathsResponse,
+    DAGAnalyzeRequest, DAGAnalyzeResponse,
+    DAGChatRequest,
+)
+from .dag_services import validate_dag, check_d_separation, find_all_paths, analyze_dag_with_gpt, chat_about_dag
 
 load_dotenv()
 
@@ -142,6 +150,68 @@ async def chat_endpoint(request: ChatInput):
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── DAG Playground Endpoints ──────────────────────────────────────────────
+
+@app.post("/dag/validate", response_model=DAGValidateResponse)
+async def dag_validate(request: DAGValidateRequest):
+    try:
+        return validate_dag(request.graph)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dag/d-separation", response_model=DSeparationResponse)
+async def dag_d_separation(request: DSeparationRequest):
+    try:
+        return check_d_separation(request.graph, request.node_a, request.node_b, request.conditioning_set)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dag/paths", response_model=PathsResponse)
+async def dag_paths(request: PathsRequest):
+    try:
+        return find_all_paths(request.graph, request.source, request.target)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dag/analyze", response_model=DAGAnalyzeResponse)
+async def dag_analyze(request: DAGAnalyzeRequest):
+    try:
+        return await analyze_dag_with_gpt(request.graph, request.research_question)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dag/chat")
+async def dag_chat(request: DAGChatRequest):
+    try:
+        async def generate():
+            stream = await chat_about_dag(
+                request.graph,
+                request.history + [{"role": "user", "content": request.message}],
+            )
+            async for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
     except Exception as e:
         import traceback
         traceback.print_exc()

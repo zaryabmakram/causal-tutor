@@ -1,11 +1,14 @@
 "use client";
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import CausalTutor from "@/components/CausalTutor";
 import CurriculumDashboard from "@/components/CurriculumDashboard";
-import { PanelLeft, BookOpen, FlaskConical } from "lucide-react";
+import { BookOpen, FlaskConical, Share2 } from "lucide-react";
+
+const DAGPlayground = dynamic(() => import("@/components/DAGPlayground"), { ssr: false });
 
 export default function Home() {
-  const [activeMode, setActiveMode] = useState<"lab" | "curriculum">("lab");
+  const [activeMode, setActiveMode] = useState<"lab" | "curriculum" | "playground">("lab");
 
   return (
     <main className="h-screen w-screen overflow-hidden bg-white flex">
@@ -14,8 +17,8 @@ export default function Home() {
         <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-lg">
            <span className="text-white font-bold text-lg">CT</span>
         </div>
-        
-        <button 
+
+        <button
             onClick={() => setActiveMode("lab")}
             className={`p-3 rounded-xl transition-all duration-200 group relative ${activeMode === 'lab' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
             title="Research Design Lab"
@@ -26,7 +29,7 @@ export default function Home() {
             </div>
         </button>
 
-        <button 
+        <button
             onClick={() => setActiveMode("curriculum")}
             className={`p-3 rounded-xl transition-all duration-200 group relative ${activeMode === 'curriculum' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
             title="Causality Curriculum"
@@ -36,14 +39,27 @@ export default function Home() {
                 Curriculum
             </div>
         </button>
+
+        <button
+            onClick={() => setActiveMode("playground")}
+            className={`p-3 rounded-xl transition-all duration-200 group relative ${activeMode === 'playground' ? 'bg-slate-800 text-amber-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+            title="DAG Playground"
+        >
+            <Share2 size={24} />
+            <div className="absolute left-14 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                DAG Playground
+            </div>
+        </button>
       </div>
 
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-hidden relative">
         {activeMode === "lab" ? (
-            <CausalTutor />
-        ) : (
+            <CausalTutor onOpenPlayground={() => setActiveMode("playground")} />
+        ) : activeMode === "curriculum" ? (
             <CurriculumDashboard />
+        ) : (
+            <DAGPlayground />
         )}
       </div>
     </main>

@@ -7,4 +7,4 @@ pydantic
 python-dotenv
 tiktoken
 pandas
-
+networkx

@@ -1,0 +1,130 @@
+[
+  {
+    "id": "smoking-lung-cancer",
+    "name": "Smoking & Lung Cancer",
+    "description": "Classic confounding example. Age and genetic predisposition confound the relationship between smoking and lung cancer.",
+    "concept": "confounding",
+    "nodes": [
+      { "id": "smoking", "label": "Smoking", "position": { "x": 250, "y": 200 } },
+      { "id": "lung_cancer", "label": "Lung Cancer", "position": { "x": 550, "y": 200 } },
+      { "id": "age", "label": "Age", "position": { "x": 400, "y": 50 } },
+      { "id": "genetics", "label": "Genetic Predisposition", "position": { "x": 400, "y": 350 }, "isLatent": true }
+    ],
+    "edges": [
+      { "source": "smoking", "target": "lung_cancer" },
+      { "source": "age", "target": "smoking" },
+      { "source": "age", "target": "lung_cancer" },
+      { "source": "genetics", "target": "smoking" },
+      { "source": "genetics", "target": "lung_cancer" }
+    ]
+  },
+  {
+    "id": "education-income",
+    "name": "Education & Income (IV)",
+    "description": "Instrumental variable example. College proximity serves as an instrument for education, while unobserved ability confounds education and income.",
+    "concept": "instrumental_variables",
+    "nodes": [
+      { "id": "proximity", "label": "College Proximity", "position": { "x": 100, "y": 200 } },
+      { "id": "education", "label": "Education", "position": { "x": 350, "y": 200 } },
+      { "id": "income", "label": "Income", "position": { "x": 600, "y": 200 } },
+      { "id": "ability", "label": "Ability", "position": { "x": 475, "y": 50 }, "isLatent": true }
+    ],
+    "edges": [
+      { "source": "proximity", "target": "education" },
+      { "source": "education", "target": "income" },
+      { "source": "ability", "target": "education" },
+      { "source": "ability", "target": "income" }
+    ]
+  },
+  {
+    "id": "drug-recovery",
+    "name": "Drug & Recovery (Front-door)",
+    "description": "Front-door criterion example. The drug affects recovery through a biomarker, while an unobserved genetic factor confounds both the drug choice and recovery.",
+    "concept": "front_door",
+    "nodes": [
+      { "id": "drug", "label": "Drug", "position": { "x": 150, "y": 200 } },
+      { "id": "biomarker", "label": "Biomarker", "position": { "x": 400, "y": 200 } },
+      { "id": "recovery", "label": "Recovery", "position": { "x": 650, "y": 200 } },
+      { "id": "genetics", "label": "Genetics", "position": { "x": 400, "y": 50 }, "isLatent": true }
+    ],
+    "edges": [
+      { "source": "drug", "target": "biomarker" },
+      { "source": "biomarker", "target": "recovery" },
+      { "source": "genetics", "target": "drug" },
+      { "source": "genetics", "target": "recovery" }
+    ]
+  },
+  {
+    "id": "college-admission",
+    "name": "College Admission (Berkson's Bias)",
+    "description": "Collider bias example. Talent and Effort are independent causes of Admission. Conditioning on Admission (a collider) creates a spurious negative association between Talent and Effort.",
+    "concept": "collider_bias",
+    "nodes": [
+      { "id": "talent", "label": "Talent", "position": { "x": 200, "y": 100 } },
+      { "id": "effort", "label": "Effort", "position": { "x": 600, "y": 100 } },
+      { "id": "admission", "label": "Admission", "position": { "x": 400, "y": 280 } }
+    ],
+    "edges": [
+      { "source": "talent", "target": "admission" },
+      { "source": "effort", "target": "admission" }
+    ]
+  },
+  {
+    "id": "vaccine-health",
+    "name": "Vaccine & Health Outcome",
+    "description": "Healthy user bias example. Health-conscious individuals are more likely to get vaccinated AND have better health outcomes, confounding the vaccine-health relationship.",
+    "concept": "healthy_user_bias",
+    "nodes": [
+      { "id": "health_consciousness", "label": "Health Consciousness", "position": { "x": 250, "y": 50 } },
+      { "id": "ses", "label": "Socioeconomic Status", "position": { "x": 550, "y": 50 } },
+      { "id": "vaccine", "label": "Vaccine", "position": { "x": 250, "y": 250 } },
+      { "id": "health_outcome", "label": "Health Outcome", "position": { "x": 550, "y": 250 } }
+    ],
+    "edges": [
+      { "source": "health_consciousness", "target": "vaccine" },
+      { "source": "health_consciousness", "target": "health_outcome" },
+      { "source": "ses", "target": "vaccine" },
+      { "source": "ses", "target": "health_outcome" },
+      { "source": "vaccine", "target": "health_outcome" }
+    ]
+  },
+  {
+    "id": "job-training",
+    "name": "Job Training & Employment",
+    "description": "Selection bias example. Motivated individuals self-select into training programs AND are more likely to find employment, creating selection bias.",
+    "concept": "selection_bias",
+    "nodes": [
+      { "id": "motivation", "label": "Motivation", "position": { "x": 400, "y": 50 }, "isLatent": true },
+      { "id": "prior_income", "label": "Prior Income", "position": { "x": 150, "y": 200 } },
+      { "id": "training", "label": "Job Training", "position": { "x": 400, "y": 200 } },
+      { "id": "employment", "label": "Employment", "position": { "x": 650, "y": 200 } }
+    ],
+    "edges": [
+      { "source": "motivation", "target": "training" },
+      { "source": "motivation", "target": "employment" },
+      { "source": "prior_income", "target": "training" },
+      { "source": "prior_income", "target": "employment" },
+      { "source": "training", "target": "employment" }
+    ]
+  },
+  {
+    "id": "m-bias",
+    "name": "M-bias (Butterfly)",
+    "description": "D-separation teaching example. X causes Y directly. U1 and U2 are unobserved and both cause Z. Conditioning on Z would open a backdoor path and bias the effect estimate. Do NOT adjust for Z.",
+    "concept": "d_separation",
+    "nodes": [
+      { "id": "U1", "label": "U1", "position": { "x": 200, "y": 50 }, "isLatent": true },
+      { "id": "U2", "label": "U2", "position": { "x": 600, "y": 50 }, "isLatent": true },
+      { "id": "Z", "label": "Z", "position": { "x": 400, "y": 150 } },
+      { "id": "X", "label": "X (Treatment)", "position": { "x": 200, "y": 300 } },
+      { "id": "Y", "label": "Y (Outcome)", "position": { "x": 600, "y": 300 } }
+    ],
+    "edges": [
+      { "source": "U1", "target": "Z" },
+      { "source": "U1", "target": "X" },
+      { "source": "U2", "target": "Z" },
+      { "source": "U2", "target": "Y" },
+      { "source": "X", "target": "Y" }
+    ]
+  }
+]

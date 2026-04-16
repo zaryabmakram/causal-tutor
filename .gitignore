@@ -6,9 +6,9 @@
 **/*.log
 
 # Environment Variables
-.env
-.env.local
-.env.*.local
+*.env
+*.env.local
+*.env.*.local
 
 # Node (Root and Subdirectories)
 node_modules/

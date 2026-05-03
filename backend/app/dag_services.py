@@ -20,6 +20,13 @@ load_dotenv()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
+def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+    """Return a per-request OpenAI client using the user's key if provided, else env-based default."""
+    if api_key:
+        return AsyncOpenAI(api_key=api_key)
+    return client
+
+
 # ---------------------------------------------------------------------------
 # Helper: Pydantic -> networkx
 # ---------------------------------------------------------------------------
@@ -445,7 +452,7 @@ Provide educational, Socratic-style feedback suitable for a university student w
 
 
 async def analyze_dag_with_gpt(
-    graph: DAGGraph, research_question: Optional[str]
+    graph: DAGGraph, research_question: Optional[str], api_key: Optional[str] = None
 ) -> DAGAnalyzeResponse:
     labels = _node_label_map(graph)
     nodes_desc = [f"{n.id} ({n.label})" for n in graph.nodes]
@@ -467,7 +474,7 @@ Edges: {', '.join(edges_desc)}
         }
     ]
 
-    completion = await client.chat.completions.create(
+    completion = await _get_client(api_key).chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": DAG_ANALYSIS_SYSTEM_PROMPT},
@@ -500,7 +507,7 @@ Instructions:
 7. Use simple, accessible language. Avoid heavy notation unless the student asks for it."""
 
 
-async def chat_about_dag(graph: DAGGraph, messages: List[dict]):
+async def chat_about_dag(graph: DAGGraph, messages: List[dict], api_key: Optional[str] = None):
     labels = _node_label_map(graph)
     nodes_desc = ", ".join([n.label for n in graph.nodes])
     edges_desc = ", ".join(
@@ -515,7 +522,7 @@ async def chat_about_dag(graph: DAGGraph, messages: List[dict]):
         if m["role"] in ["user", "assistant"]:
             formatted_messages.append({"role": m["role"], "content": m["content"]})
 
-    completion = await client.chat.completions.create(
+    completion = await _get_client(api_key).chat.completions.create(
         model="gpt-4o",
         messages=formatted_messages,
         stream=True,

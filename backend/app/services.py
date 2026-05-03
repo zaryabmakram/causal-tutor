@@ -12,15 +12,22 @@ from .models import CausalQueryResponse, DatasetSchema, ExamResponse, ExamQuesti
 # Load environment variables FIRST, before initializing the client
 load_dotenv()
 
-# Initialize client with key from environment (or explicit fallback if needed for debugging)
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    # Fallback to check if it's set in the system environment variables (outside .env file)
+# Default client uses the .env key; per-request overrides pass api_key explicitly.
+_env_api_key = os.getenv("OPENAI_API_KEY")
+if not _env_api_key:
     print("Warning: OPENAI_API_KEY not found in .env or environment variables.")
 
-client = AsyncOpenAI(api_key=api_key)
+client = AsyncOpenAI(api_key=_env_api_key)
 
-async def generate_single_question(method_name: str) -> ExamQuestion:
+
+def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+    """Return a per-request OpenAI client using the user's key if provided, else env-based default."""
+    if api_key:
+        return AsyncOpenAI(api_key=api_key)
+    return client
+
+
+async def generate_single_question(method_name: str, api_key: Optional[str] = None) -> ExamQuestion:
     prompt = f"""Generate exactly 1 high-quality multiple-choice exam question to test a student's understanding of the causal method: {method_name}.
     
     Focus on:
@@ -41,24 +48,24 @@ async def generate_single_question(method_name: str) -> ExamQuestion:
         }
     ]
     
-    completion = await client.chat.completions.create(
+    completion = await _get_client(api_key).chat.completions.create(
         model="gpt-4o-mini", # Fallback to gpt-4o-mini due to SDK versioning issues with gpt-5
         messages=[{"role": "user", "content": prompt}],
         tools=tools,
         tool_choice={"type": "function", "function": {"name": "provide_exam_question"}}
     )
-    
+
     tool_call = completion.choices[0].message.tool_calls[0]
     return ExamQuestion(**json.loads(tool_call.function.arguments))
 
-async def generate_exam_questions(method_name: str, num_questions: int = 15) -> ExamResponse:
+async def generate_exam_questions(method_name: str, num_questions: int = 15, api_key: Optional[str] = None) -> ExamResponse:
     # Use asyncio.gather to generate questions in parallel
     import asyncio
-    
+
     # We generate num_questions (default 15) in parallel
-    tasks = [generate_single_question(method_name) for _ in range(num_questions)]
+    tasks = [generate_single_question(method_name, api_key=api_key) for _ in range(num_questions)]
     questions = await asyncio.gather(*tasks)
-    
+
     return ExamResponse(
         method_name=method_name,
         questions=list(questions)
@@ -122,7 +129,7 @@ CITATION RULES:
 Return the output in the specified JSON structure.
 """
 
-async def analyze_paper(text: str, filename: str) -> CausalQueryResponse:
+async def analyze_paper(text: str, filename: str, api_key: Optional[str] = None) -> CausalQueryResponse:
     tools = [
         {
             "type": "function",
@@ -133,21 +140,21 @@ async def analyze_paper(text: str, filename: str) -> CausalQueryResponse:
             }
         }
     ]
-    
-    completion = await client.chat.completions.create(
+
+    completion = await _get_client(api_key).chat.completions.create(
         model="gpt-4o", # Fallback to gpt-4o due to SDK versioning issues with gpt-5
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Analyze the following text/paper: {filename}\n\n{text[:100000]}"} 
+            {"role": "user", "content": f"Analyze the following text/paper: {filename}\n\n{text[:100000]}"}
         ],
         tools=tools,
         tool_choice={"type": "function", "function": {"name": "provide_causal_analysis"}}
     )
-    
+
     tool_call = completion.choices[0].message.tool_calls[0]
     return CausalQueryResponse(**json.loads(tool_call.function.arguments))
 
-async def chat_with_paper(paper_text: str, analysis_context: Optional[str], messages: List[dict], model: str = "gpt-4o"):
+async def chat_with_paper(paper_text: str, analysis_context: Optional[str], messages: List[dict], model: str = "gpt-4o", api_key: Optional[str] = None):
     system_prompt_content = f"""You are a helpful and Socratic Causal Tutor. Your goal is to help students understand the causal inference methods used in the provided research paper or scenario.
 
 Current Analysis Context:
@@ -176,7 +183,7 @@ Instructions for Tutor:
         if m["role"] in ["user", "assistant"]:
             formatted_messages.append({"role": m["role"], "content": m["content"]})
     
-    completion = await client.chat.completions.create(
+    completion = await _get_client(api_key).chat.completions.create(
         model=model, # Fallback to gpt-4o
         messages=formatted_messages,
         stream=True

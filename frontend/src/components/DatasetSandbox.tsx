@@ -10,6 +10,8 @@ import type {
 } from "@/types";
 import QueryGallery from "./sandbox/QueryGallery";
 import AnalysisView from "./sandbox/AnalysisView";
+import { getApiHeaders } from "@/lib/apiKey";
+import { checkAuthResponse } from "@/lib/apiErrors";
 
 export default function DatasetSandbox() {
   const [queries, setQueries] = useState<SandboxQuery[]>([]);
@@ -87,13 +89,14 @@ export default function DatasetSandbox() {
       if (res.data.estimate !== null) {
         const response = await fetch("http://localhost:8000/sandbox/interpret", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getApiHeaders() },
           body: JSON.stringify({
             result: res.data,
             query: selectedQuery.query,
             dataset_description: selectedQuery.dataset_description,
           }),
         });
+        await checkAuthResponse(response);
         if (!response.body) throw new Error("No response body");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -107,6 +110,10 @@ export default function DatasetSandbox() {
       }
     } catch (err) {
       console.error("Estimation failed", err);
+      const isAuth = err instanceof Error && (err as { status?: number }).status === 401;
+      if (isAuth) {
+        setInterpretation((err as Error).message);
+      }
     } finally {
       setRunning(false);
     }

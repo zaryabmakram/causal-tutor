@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { X, ArrowUp, Loader2, Bot, User, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { getApiHeaders } from "@/lib/apiKey";
+import { checkAuthResponse } from "@/lib/apiErrors";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -38,7 +40,7 @@ export default function DAGChatPanel({ nodes, edges, isOpen, onClose }: DAGChatP
     try {
       const response = await fetch("http://localhost:8000/dag/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getApiHeaders() },
         body: JSON.stringify({
           message: userMsg,
           history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -46,6 +48,7 @@ export default function DAGChatPanel({ nodes, edges, isOpen, onClose }: DAGChatP
         }),
       });
 
+      await checkAuthResponse(response);
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
@@ -66,9 +69,13 @@ export default function DAGChatPanel({ nodes, edges, isOpen, onClose }: DAGChatP
       }
     } catch (error) {
       console.error(error);
+      const isAuth = error instanceof Error && (error as { status?: number }).status === 401;
+      const content = isAuth
+        ? (error as Error).message
+        : "Sorry, I encountered an error. Please try again.";
       setChatHistory((prev) => [
         ...prev,
-        { role: "assistant", content: "Sorry, I encountered an error. Please try again." },
+        { role: "assistant", content },
       ]);
     } finally {
       setLoading(false);

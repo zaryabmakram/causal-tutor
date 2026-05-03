@@ -50,6 +50,8 @@ import type {
 } from "@/types";
 import DAGChatPanel from "./DAGChatPanel";
 import CausalAnalysisPanel from "./CausalAnalysisPanel";
+import { getApiHeaders } from "@/lib/apiKey";
+import { handleAuthError } from "@/lib/apiErrors";
 
 // ── Custom Node ──────────────────────────────────────────────────────────
 
@@ -698,11 +700,14 @@ export default function DAGPlayground() {
       const graph = toGraphPayload(nodes, edges);
       const res = await axios.post<DAGAnalysisResult>("http://localhost:8000/dag/analyze", {
         graph,
+      }, {
+        headers: { ...getApiHeaders() },
       });
       setDagAnalysis(res.data);
     } catch (err) {
       console.error(err);
-      showToast("Failed to analyze DAG");
+      const authMsg = handleAuthError(err);
+      showToast(authMsg || "Failed to analyze DAG");
       setShowAnalysisModal(false);
     } finally {
       setAnalysisLoading(false);

@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
+from openai import AsyncOpenAI, AuthenticationError as OpenAIAuthError
 
 from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest, ResearchProject, ExamResponse
 from .services import analyze_paper, extract_text_from_pdf, extract_csv_schema, chat_with_paper, generate_exam_questions
@@ -41,6 +42,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Helpers for OpenAI key auth ───────────────────────────────────────────
+
+_MISSING_KEY_MSG = (
+    "OpenAI API key not set. Open the API key settings (key icon, bottom-left of the sidebar) "
+    "and save your key."
+)
+
+_INVALID_KEY_MSG = (
+    "Invalid OpenAI API key. Open the API key settings (key icon, bottom-left) and update your key."
+)
+
+
+def _require_api_key(key: Optional[str]) -> str:
+    """Reject requests that didn't supply an X-OpenAI-Key header. The .env key is a
+    local-development convenience used only to prefill the UI input — production users
+    must explicitly save their key in the UI."""
+    if not key or not key.strip():
+        raise HTTPException(status_code=401, detail=_MISSING_KEY_MSG)
+    return key.strip()
+
+
+def _raise_auth_failure():
+    raise HTTPException(status_code=401, detail=_INVALID_KEY_MSG)
+
+
 @app.get("/")
 def read_root():
     return {"message": "Causal Tutor API is running"}
@@ -49,11 +75,48 @@ def read_root():
 async def get_curriculum_methods():
     return CURRICULUM_METHODS
 
-@app.post("/generate-exam", response_model=ExamResponse)
-async def generate_exam_endpoint(method_name: str, num_questions: int = 5):
+@app.get("/config/openai-key")
+def get_openai_key_config():
+    """Returns the OPENAI_API_KEY loaded from .env so the frontend can prefill the
+    user-editable key input. Returns empty string if no env key is set. The .env value
+    is a developer convenience for local testing — actual requests are rejected unless
+    the user explicitly saves a key in the UI (see _require_api_key)."""
+    env_key = os.getenv("OPENAI_API_KEY", "") or ""
+    return {"api_key": env_key, "has_env_key": bool(env_key)}
+
+
+class ValidateKeyRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/config/validate-key")
+async def validate_openai_key(request: ValidateKeyRequest):
+    """Pre-flight check used by the API key settings UI. Hits OpenAI's cheapest
+    endpoint (`models.list`) to verify the key works."""
+    if not request.api_key or not request.api_key.strip():
+        return {"valid": False, "error": "API key is empty."}
     try:
-        exam = await generate_exam_questions(method_name, num_questions)
-        return exam
+        test_client = AsyncOpenAI(api_key=request.api_key.strip())
+        await test_client.models.list()
+        return {"valid": True}
+    except OpenAIAuthError:
+        return {"valid": False, "error": "Invalid API key (OpenAI rejected it)."}
+    except Exception as e:
+        return {"valid": False, "error": f"Validation failed: {str(e)[:200]}"}
+
+@app.post("/generate-exam", response_model=ExamResponse)
+async def generate_exam_endpoint(
+    method_name: str,
+    num_questions: int = 5,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    api_key = _require_api_key(x_openai_key)
+    try:
+        return await generate_exam_questions(method_name, num_questions, api_key=api_key)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -63,8 +126,10 @@ async def generate_exam_endpoint(method_name: str, num_questions: int = 5):
 async def analyze_project_endpoint(
     rq_text: str = Form(...),
     pdf_file: Optional[UploadFile] = File(None),
-    csv_file: Optional[UploadFile] = File(None)
+    csv_file: Optional[UploadFile] = File(None),
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
 ):
+    api_key = _require_api_key(x_openai_key)
     try:
         # 1. Process PDF if present
         pdf_text = None
@@ -87,7 +152,7 @@ async def analyze_project_endpoint(
             synthesis_text += f"Reference Paper Content:\n{pdf_text[:50000]}" # Limit context
         
         # 4. Run Analysis
-        analysis = await analyze_paper(synthesis_text, "Research Design Project")
+        analysis = await analyze_paper(synthesis_text, "Research Design Project", api_key=api_key)
         
         return {
             "project": {
@@ -100,38 +165,56 @@ async def analyze_project_endpoint(
             "full_text": synthesis_text
         }
 
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze", response_model=APIAnalysisResponse)
-async def analyze_endpoint(file: UploadFile = File(...)):
+async def analyze_endpoint(
+    file: UploadFile = File(...),
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
-    
+    api_key = _require_api_key(x_openai_key)
+
     try:
         # Extract text
         text = await extract_text_from_pdf(file)
-        
+
         # Analyze with LLM
-        # We pass the text to the analysis service
-        analysis = await analyze_paper(text, file.filename)
-        
+        analysis = await analyze_paper(text, file.filename, api_key=api_key)
+
         # Return both analysis and full text for frontend context
         return APIAnalysisResponse(analysis=analysis, full_text=text)
-        
+
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze-scenario", response_model=APIAnalysisResponse)
-async def analyze_scenario_endpoint(request: AnalyzeTextRequest):
+async def analyze_scenario_endpoint(
+    request: AnalyzeTextRequest,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    api_key = _require_api_key(x_openai_key)
     try:
-        # Analyze text directly
-        analysis = await analyze_paper(request.text, request.scenario_name)
+        analysis = await analyze_paper(request.text, request.scenario_name, api_key=api_key)
         return APIAnalysisResponse(analysis=analysis, full_text=request.text)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -144,26 +227,34 @@ class ChatInput(BaseModel):
     analysis_context: Optional[str] = None # Added for context
 
 @app.post("/chat")
-async def chat_endpoint(request: ChatInput):
-    # This endpoint streams the response
+async def chat_endpoint(
+    request: ChatInput,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    # This endpoint streams the response.
+    # Note: we kick off the OpenAI request *before* StreamingResponse so auth errors
+    # surface as proper HTTP 401 (instead of silently failing mid-stream after headers
+    # have already been flushed as 200).
+    api_key = _require_api_key(x_openai_key)
+    messages = request.history + [{"role": "user", "content": request.message}]
     try:
-        # Format history for OpenAI
-        # We assume history is a list of {"role": "user"/"assistant", "content": "..."}
-        messages = request.history + [{"role": "user", "content": request.message}]
-        
-        async def generate():
-            stream = await chat_with_paper(request.paper_text, request.analysis_context, messages)
-            async for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-
+        stream = await chat_with_paper(request.paper_text, request.analysis_context, messages, api_key=api_key)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+    async def generate():
+        async for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ── DAG Playground Endpoints ──────────────────────────────────────────────
@@ -217,9 +308,17 @@ async def dag_causal_analysis(request: CausalAnalysisRequest):
 
 
 @app.post("/dag/analyze", response_model=DAGAnalyzeResponse)
-async def dag_analyze(request: DAGAnalyzeRequest):
+async def dag_analyze(
+    request: DAGAnalyzeRequest,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    api_key = _require_api_key(x_openai_key)
     try:
-        return await analyze_dag_with_gpt(request.graph, request.research_question)
+        return await analyze_dag_with_gpt(request.graph, request.research_question, api_key=api_key)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -227,23 +326,33 @@ async def dag_analyze(request: DAGAnalyzeRequest):
 
 
 @app.post("/dag/chat")
-async def dag_chat(request: DAGChatRequest):
+async def dag_chat(
+    request: DAGChatRequest,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    api_key = _require_api_key(x_openai_key)
     try:
-        async def generate():
-            stream = await chat_about_dag(
-                request.graph,
-                request.history + [{"role": "user", "content": request.message}],
-            )
-            async for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        stream = await chat_about_dag(
+            request.graph,
+            request.history + [{"role": "user", "content": request.message}],
+            api_key=api_key,
+        )
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+    async def generate():
+        async for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ── Dataset Sandbox Endpoints ─────────────────────────────────────────────
@@ -283,17 +392,26 @@ async def sandbox_estimate_endpoint(request: EstimateRequest):
 
 
 @app.post("/sandbox/interpret")
-async def sandbox_interpret(request: InterpretRequest):
+async def sandbox_interpret(
+    request: InterpretRequest,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+):
+    api_key = _require_api_key(x_openai_key)
     try:
-        async def generate():
-            stream = await interpret_result(request)
-            async for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        stream = await interpret_result(request, api_key=api_key)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+    async def generate():
+        async for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/event-stream")

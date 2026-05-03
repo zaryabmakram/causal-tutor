@@ -77,6 +77,24 @@ export interface DAGAnalysisResult {
   faithfulness_notes: string;
 }
 
+export interface AnalysisPathInfo {
+  path: string[];
+  path_type: string;
+  is_blocked: boolean;
+  block_reason: string | null;
+  collider_nodes: string[];
+}
+
+export interface CausalAnalysisResult {
+  paths: AnalysisPathInfo[];
+  d_separated: boolean;
+  active_paths: string[][];
+  backdoor_satisfied: boolean;
+  backdoor_issues: string[];
+  minimal_adjustment_set: string[] | null;
+  explanation: string;
+}
+
 // ── Dataset Sandbox Types ────────────────────────────────────────────────
 
 export interface SandboxQuery {

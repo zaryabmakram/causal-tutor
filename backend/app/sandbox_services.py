@@ -18,6 +18,13 @@ from .sandbox_models import (
 load_dotenv()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+
+def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+    """Return a per-request OpenAI client using the user's key if provided, else env-based default."""
+    if api_key:
+        return AsyncOpenAI(api_key=api_key)
+    return client
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CURATED_JSON = DATA_DIR / "curated_queries.json"
 
@@ -655,7 +662,7 @@ Style:
 """
 
 
-async def interpret_result(req: InterpretRequest):
+async def interpret_result(req: InterpretRequest, api_key: Optional[str] = None):
     result = req.result
     warnings_block = "\n".join(f"- {w}" for w in result.warnings) or "(none)"
     assumptions_block = "\n".join(f"- {a}" for a in result.assumptions)
@@ -683,7 +690,7 @@ Identifying assumptions for {result.method.upper()}:
 {assumptions_block}
 """
 
-    completion = await client.chat.completions.create(
+    completion = await _get_client(api_key).chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": INTERPRET_SYSTEM_PROMPT},

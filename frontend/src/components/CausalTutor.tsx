@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { APIAnalysisResponse } from "@/types";
+import { getApiHeaders } from "@/lib/apiKey";
+import { handleAuthError, checkAuthResponse } from "@/lib/apiErrors";
 import { 
   Loader2, Paperclip, Bot, User,
   Plus, PanelRightClose, PanelRightOpen,
@@ -172,12 +174,14 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
             const formData = new FormData();
             formData.append("file", file);
             response = await axios.post<APIAnalysisResponse>("http://localhost:8000/analyze", formData, {
-              headers: { "Content-Type": "multipart/form-data" },
+              headers: { "Content-Type": "multipart/form-data", ...getApiHeaders() },
             });
         } else {
             response = await axios.post<APIAnalysisResponse>("http://localhost:8000/analyze-scenario", {
                 text: input,
                 scenario_name: "User Scenario"
+            }, {
+                headers: { ...getApiHeaders() },
             });
         }
 
@@ -229,7 +233,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
 
         const response = await fetch("http://localhost:8000/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getApiHeaders() },
             body: JSON.stringify({
               message: userMsg,
               history: chatHistory.map(m => ({ role: m.role, content: m.content })), // Send raw content
@@ -238,6 +242,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
             }),
         });
 
+        await checkAuthResponse(response);
         if (!response.body) throw new Error("No response body");
 
         const reader = response.body.getReader();
@@ -267,7 +272,9 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
       }
     } catch (error) {
       console.error(error);
-      setChatHistory(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error processing your request. Please try again.", type: "text" }]);
+      const authMsg = handleAuthError(error) || (error instanceof Error && (error as { status?: number }).status === 401 ? error.message : null);
+      const content = authMsg || "Sorry, I encountered an error processing your request. Please try again.";
+      setChatHistory(prev => [...prev, { role: "assistant", content, type: "text" }]);
     } finally {
       setLoading(false);
     }
@@ -411,7 +418,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
                             <SuggestionCard
                                 icon={<Database size={20} className="text-cyan-500" />}
                                 title="Dataset Sandbox"
-                                subtitle="Run causal methods on actual data"
+                                subtitle="Run causal methods on real data"
                                 onClick={() => onOpenSandbox?.()}
                             />
                         </div>
@@ -737,7 +744,7 @@ function SuggestionCard({ icon, title, subtitle, onClick }: { icon: React.ReactN
     return (
         <button 
             onClick={onClick}
-            className="flex flex-col items-start p-5 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 hover:border-slate-300 hover:shadow-md transition-all text-left shadow-sm group w-full sm:w-[calc(50%-0.5rem)] md:w-[260px] relative overflow-hidden"
+            className="flex flex-col items-start p-5 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 hover:border-slate-300 hover:shadow-md transition-all text-left shadow-sm group w-full sm:w-[calc(50%-0.5rem)] md:w-[220px] relative overflow-hidden"
         >
             <div className="mb-3 p-2 bg-slate-50 rounded-xl group-hover:bg-white group-hover:scale-110 transition-all duration-300 border border-slate-100 shadow-sm">{icon}</div>
             <div className="font-bold text-sm text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors">{title}</div>

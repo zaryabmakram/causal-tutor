@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { BookOpen, GraduationCap, PlayCircle, Loader2, ArrowLeft, CheckCircle2, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
+import { getApiHeaders } from "@/lib/apiKey";
+import { checkAuthResponse } from "@/lib/apiErrors";
 
 const MermaidChart = dynamic(() => import("./MermaidChart"), { ssr: false });
 
@@ -48,7 +50,14 @@ export default function CurriculumDashboard() {
     const startExam = async (methodId: string, methodTitle: string) => {
         setLoadingExam(methodId);
         try {
-            const res = await fetch(`http://localhost:8000/generate-exam?method_name=${methodTitle}&num_questions=${numQuestions}`, { method: "POST" });
+            const res = await fetch(`http://localhost:8000/generate-exam?method_name=${methodTitle}&num_questions=${numQuestions}`, {
+                method: "POST",
+                headers: { ...getApiHeaders() },
+            });
+            await checkAuthResponse(res);
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
             const data = await res.json();
             setExamQuestions(data.questions);
             setViewMode("exam");
@@ -57,7 +66,8 @@ export default function CurriculumDashboard() {
             setShowResult(false);
         } catch (e) {
             console.error(e);
-            alert("Failed to generate exam. Ensure backend is running.");
+            const isAuth = e instanceof Error && (e as { status?: number }).status === 401;
+            alert(isAuth ? (e as Error).message : "Failed to generate exam. Ensure backend is running.");
         } finally {
             setLoadingExam(null);
         }

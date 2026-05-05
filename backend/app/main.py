@@ -33,11 +33,22 @@ load_dotenv()
 
 app = FastAPI(title="Causal Tutor API", description="AI-powered causal inference tutor")
 
-# CORS for frontend
+# CORS for frontend.
+# Set ALLOWED_ORIGINS to a comma-separated list of allowed origins in production
+# (e.g. "https://causal-tutor.vercel.app"). Defaults to "*" for local dev.
+_origins_env = os.getenv("ALLOWED_ORIGINS", "*").strip()
+_origins = (
+    ["*"]
+    if _origins_env == "*"
+    else [o.strip() for o in _origins_env.split(",") if o.strip()]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for simplicity in dev, restrict in prod
-    allow_credentials=True,
+    allow_origins=_origins,
+    # When origins is "*", browsers reject responses that also set
+    # Access-Control-Allow-Credentials: true — so disable credentials in that case.
+    allow_credentials=_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

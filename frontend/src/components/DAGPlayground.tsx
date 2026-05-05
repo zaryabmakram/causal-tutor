@@ -52,6 +52,7 @@ import DAGChatPanel from "./DAGChatPanel";
 import CausalAnalysisPanel from "./CausalAnalysisPanel";
 import { getApiHeaders } from "@/lib/apiKey";
 import { handleAuthError } from "@/lib/apiErrors";
+import { apiUrl } from "@/lib/api";
 
 // ── Custom Node ──────────────────────────────────────────────────────────
 
@@ -269,7 +270,7 @@ export default function DAGPlayground() {
       const graph = toGraphPayload(nodes, edges);
       const latentNodes = nodes.filter((n) => n.data.isLatent).map((n) => n.id);
       const res = await axios.post<CausalAnalysisResult>(
-        "http://localhost:8000/dag/causal-analysis",
+        apiUrl("/dag/causal-analysis"),
         {
           graph,
           treatment: treatmentId,
@@ -327,7 +328,7 @@ export default function DAGPlayground() {
       // Validate acyclicity
       try {
         const graph = toGraphPayload(nodes, updatedEdges);
-        const res = await axios.post("http://localhost:8000/dag/validate", { graph });
+        const res = await axios.post(apiUrl("/dag/validate"), { graph });
         if (!res.data.is_acyclic) {
           showToast("This edge would create a cycle. DAGs must be acyclic.");
           return;
@@ -447,7 +448,7 @@ export default function DAGPlayground() {
 
       try {
         const graph = toGraphPayload(nodes, edges);
-        const res = await axios.post("http://localhost:8000/dag/paths", {
+        const res = await axios.post(apiUrl("/dag/paths"), {
           graph,
           source: edge.source,
           target: edge.target,
@@ -525,7 +526,7 @@ export default function DAGPlayground() {
 
           try {
             const graph = toGraphPayload(nodes, edges);
-            const res = await axios.post<PathsResponse>("http://localhost:8000/dag/paths", {
+            const res = await axios.post<PathsResponse>(apiUrl("/dag/paths"), {
               graph,
               source,
               target,
@@ -629,7 +630,7 @@ export default function DAGPlayground() {
   const queryDSeparation = async (nodeA: string, nodeB: string, condSet: string[]) => {
     try {
       const graph = toGraphPayload(nodes, edges);
-      const res = await axios.post<DSeparationResult>("http://localhost:8000/dag/d-separation", {
+      const res = await axios.post<DSeparationResult>(apiUrl("/dag/d-separation"), {
         graph,
         node_a: nodeA,
         node_b: nodeB,
@@ -698,7 +699,7 @@ export default function DAGPlayground() {
 
     try {
       const graph = toGraphPayload(nodes, edges);
-      const res = await axios.post<DAGAnalysisResult>("http://localhost:8000/dag/analyze", {
+      const res = await axios.post<DAGAnalysisResult>(apiUrl("/dag/analyze"), {
         graph,
       }, {
         headers: { ...getApiHeaders() },

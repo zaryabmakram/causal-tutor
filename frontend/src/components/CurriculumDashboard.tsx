@@ -5,6 +5,7 @@ import { BookOpen, GraduationCap, PlayCircle, Loader2, ArrowLeft, CheckCircle2, 
 import dynamic from "next/dynamic";
 import { getApiHeaders } from "@/lib/apiKey";
 import { checkAuthResponse } from "@/lib/apiErrors";
+import { apiUrl } from "@/lib/api";
 
 const MermaidChart = dynamic(() => import("./MermaidChart"), { ssr: false });
 
@@ -23,7 +24,7 @@ export default function CurriculumDashboard() {
     useEffect(() => {
         const fetchMethods = async () => {
             try {
-                const res = await fetch("http://localhost:8000/curriculum-methods");
+                const res = await fetch(apiUrl("/curriculum-methods"));
                 const data = await res.json();
                 // Map object to array
                 const methodsArray = Object.keys(data).map(key => ({
@@ -50,7 +51,7 @@ export default function CurriculumDashboard() {
     const startExam = async (methodId: string, methodTitle: string) => {
         setLoadingExam(methodId);
         try {
-            const res = await fetch(`http://localhost:8000/generate-exam?method_name=${methodTitle}&num_questions=${numQuestions}`, {
+            const res = await fetch(apiUrl(`/generate-exam?method_name=${methodTitle}&num_questions=${numQuestions}`), {
                 method: "POST",
                 headers: { ...getApiHeaders() },
             });

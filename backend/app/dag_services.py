@@ -17,14 +17,15 @@ from .dag_models import (
 )
 
 load_dotenv()
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
-    """Return a per-request OpenAI client using the user's key if provided, else env-based default."""
-    if api_key:
-        return AsyncOpenAI(api_key=api_key)
-    return client
+    """Build a per-request OpenAI client. Endpoints in main.py reject requests
+    that don't supply an API key (`_require_api_key`) before reaching this function."""
+    effective = api_key or os.getenv("OPENAI_API_KEY")
+    if not effective:
+        raise RuntimeError("OpenAI API key not provided.")
+    return AsyncOpenAI(api_key=effective)
 
 
 # ---------------------------------------------------------------------------

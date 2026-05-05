@@ -9,22 +9,23 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from .models import CausalQueryResponse, DatasetSchema, ExamResponse, ExamQuestion
 
-# Load environment variables FIRST, before initializing the client
+# Load environment variables (used only as a local-dev convenience; the prefilled
+# value lets the dev populate the UI input without retyping their key on every restart).
 load_dotenv()
-
-# Default client uses the .env key; per-request overrides pass api_key explicitly.
-_env_api_key = os.getenv("OPENAI_API_KEY")
-if not _env_api_key:
-    print("Warning: OPENAI_API_KEY not found in .env or environment variables.")
-
-client = AsyncOpenAI(api_key=_env_api_key)
 
 
 def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
-    """Return a per-request OpenAI client using the user's key if provided, else env-based default."""
-    if api_key:
-        return AsyncOpenAI(api_key=api_key)
-    return client
+    """Build a per-request OpenAI client. Endpoints in main.py reject requests
+    that don't supply an API key (`_require_api_key`) before reaching this function,
+    so `api_key` is normally non-empty here. Falls back to the env value if present
+    purely as a safety net for dev tooling that bypasses the API layer."""
+    effective = api_key or os.getenv("OPENAI_API_KEY")
+    if not effective:
+        raise RuntimeError(
+            "OpenAI API key not provided. The endpoint should reject this earlier; "
+            "see main.py:_require_api_key."
+        )
+    return AsyncOpenAI(api_key=effective)
 
 
 async def generate_single_question(method_name: str, api_key: Optional[str] = None) -> ExamQuestion:

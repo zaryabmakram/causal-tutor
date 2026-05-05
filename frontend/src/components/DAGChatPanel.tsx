@@ -5,6 +5,7 @@ import { X, ArrowUp, Loader2, Bot, User, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { getApiHeaders } from "@/lib/apiKey";
 import { checkAuthResponse } from "@/lib/apiErrors";
+import { apiUrl } from "@/lib/api";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -38,7 +39,7 @@ export default function DAGChatPanel({ nodes, edges, isOpen, onClose }: DAGChatP
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/dag/chat", {
+      const response = await fetch(apiUrl("/dag/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getApiHeaders() },
         body: JSON.stringify({

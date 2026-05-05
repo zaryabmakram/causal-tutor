@@ -12,6 +12,7 @@ import QueryGallery from "./sandbox/QueryGallery";
 import AnalysisView from "./sandbox/AnalysisView";
 import { getApiHeaders } from "@/lib/apiKey";
 import { checkAuthResponse } from "@/lib/apiErrors";
+import { apiUrl } from "@/lib/api";
 
 export default function DatasetSandbox() {
   const [queries, setQueries] = useState<SandboxQuery[]>([]);
@@ -33,7 +34,7 @@ export default function DatasetSandbox() {
   // Load queries once
   useEffect(() => {
     axios
-      .get<{ queries: SandboxQuery[] }>("http://localhost:8000/sandbox/queries")
+      .get<{ queries: SandboxQuery[] }>(apiUrl("/sandbox/queries"))
       .then((res) => setQueries(res.data.queries))
       .catch((err) => console.error("Failed to load queries", err));
   }, []);
@@ -51,7 +52,7 @@ export default function DatasetSandbox() {
 
     axios
       .get<SandboxDatasetPreview>(
-        `http://localhost:8000/sandbox/dataset?id=${selectedId}&limit=50`
+        apiUrl(`/sandbox/dataset?id=${selectedId}&limit=50`)
       )
       .then((res) => {
         setDataset(res.data);
@@ -80,14 +81,14 @@ export default function DatasetSandbox() {
 
     try {
       const res = await axios.post<EstimateResponse>(
-        "http://localhost:8000/sandbox/estimate",
+        apiUrl("/sandbox/estimate"),
         { id: selectedQuery.id, method, variables: vars }
       );
       setResult(res.data);
 
       // Only stream interpretation if we have a real estimate
       if (res.data.estimate !== null) {
-        const response = await fetch("http://localhost:8000/sandbox/interpret", {
+        const response = await fetch(apiUrl("/sandbox/interpret"), {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getApiHeaders() },
           body: JSON.stringify({

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { KeyRound, Eye, EyeOff, Check, RotateCcw, X, AlertTriangle, Loader2 } from "lucide-react";
 import axios from "axios";
 import { saveKey, clearKey, useStoredKey } from "@/lib/apiKey";
+import { apiUrl } from "@/lib/api";
 
 interface ApiKeySettingsProps {
   isOpen: boolean;
@@ -35,7 +36,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
     }
     setLoading(true);
     axios
-      .get<{ api_key: string }>("http://localhost:8000/config/openai-key")
+      .get<{ api_key: string }>(apiUrl("/config/openai-key"))
       .then((res) => setInput(res.data.api_key || ""))
       .catch(() => setInput(""))
       .finally(() => setLoading(false));
@@ -67,7 +68,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
     setValidating(true);
     try {
       const res = await axios.post<{ valid: boolean; error?: string }>(
-        "http://localhost:8000/config/validate-key",
+        apiUrl("/config/validate-key"),
         { api_key: trimmed }
       );
       if (!res.data.valid) {

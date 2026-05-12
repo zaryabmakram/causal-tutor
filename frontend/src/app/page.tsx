@@ -1,10 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import CausalTutor from "@/components/CausalTutor";
 import CurriculumDashboard from "@/components/CurriculumDashboard";
 import ApiKeySettings from "@/components/ApiKeySettings";
-import { BookOpen, FlaskConical, Share2, Database, KeyRound } from "lucide-react";
+import TutorChatPanel, { type TutorFeature } from "@/components/TutorChatPanel";
+import { BookOpen, FlaskConical, Share2, Database, KeyRound, MessageSquare } from "lucide-react";
 import { useStoredKey } from "@/lib/apiKey";
 import { API_KEY_MODAL_EVENT } from "@/lib/apiErrors";
 
@@ -16,11 +17,47 @@ export default function Home() {
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const storedKey = useStoredKey();
 
+  // ── Unified Tutor chat state (panel + current feature context) ──
+  const [tutorChatOpen, setTutorChatOpen] = useState(false);
+  const [featureContext, setFeatureContext] = useState<{ feature: TutorFeature; payload: any }>({
+    feature: "general",
+    payload: undefined,
+  });
+  // True while the user is mid-exam in Curriculum — hides FAB and force-closes the panel.
+  const [chatLocked, setChatLocked] = useState(false);
+
+  // Reset context to "general" when switching to Lab or Sandbox (which don't publish)
+  useEffect(() => {
+    if (activeMode === "lab" || activeMode === "sandbox") {
+      setFeatureContext({ feature: "general", payload: undefined });
+    }
+    // For curriculum/playground, the child component publishes via onContextChange.
+  }, [activeMode]);
+
+  // Force-close the chat whenever it's locked (e.g., during an exam).
+  useEffect(() => {
+    if (chatLocked) setTutorChatOpen(false);
+  }, [chatLocked]);
+
+  const handleContextChange = useCallback(
+    (ctx: { feature: TutorFeature; payload: any }) => setFeatureContext(ctx),
+    []
+  );
+  const handleChatLockedChange = useCallback((locked: boolean) => setChatLocked(locked), []);
+
   // Open the API key modal when any OpenAI-using request returns 401
   useEffect(() => {
     const handler = () => setApiKeyOpen(true);
     window.addEventListener(API_KEY_MODAL_EVENT, handler);
     return () => window.removeEventListener(API_KEY_MODAL_EVENT, handler);
+  }, []);
+
+  // Track first-mount of the whole app so Lab can show an empty state on fresh
+  // load but auto-resume on intra-SPA tab switches. page.tsx stays mounted
+  // across tab navigation, so this ref only re-initializes on browser reload.
+  const isFirstPageMount = useRef(true);
+  useEffect(() => {
+    isFirstPageMount.current = false;
   }, []);
 
   return (
@@ -99,21 +136,48 @@ export default function Home() {
         <ApiKeySettings isOpen={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 h-full overflow-hidden relative">
-        {activeMode === "lab" ? (
-            <CausalTutor
-              onOpenPlayground={() => setActiveMode("playground")}
-              onOpenSandbox={() => setActiveMode("sandbox")}
-            />
-        ) : activeMode === "curriculum" ? (
-            <CurriculumDashboard />
-        ) : activeMode === "playground" ? (
-            <DAGPlayground />
-        ) : (
-            <DatasetSandbox />
-        )}
+      {/* Main Content Area + Tutor Chat panel as flex siblings */}
+      <div className="flex-1 h-full overflow-hidden relative flex">
+        <div className="flex-1 h-full overflow-hidden relative">
+          {activeMode === "lab" ? (
+              <CausalTutor
+                onOpenPlayground={() => setActiveMode("playground")}
+                onOpenSandbox={() => setActiveMode("sandbox")}
+                skipInitialResume={isFirstPageMount.current}
+              />
+          ) : activeMode === "curriculum" ? (
+              <CurriculumDashboard
+                onContextChange={handleContextChange}
+                onChatLockedChange={handleChatLockedChange}
+              />
+          ) : activeMode === "playground" ? (
+              <DAGPlayground onContextChange={handleContextChange} />
+          ) : (
+              <DatasetSandbox />
+          )}
+        </div>
+
+        <TutorChatPanel
+          isOpen={tutorChatOpen}
+          onClose={() => setTutorChatOpen(false)}
+          feature={featureContext.feature}
+          featureContext={featureContext.payload}
+          skipInitialResume={isFirstPageMount.current}
+        />
       </div>
+
+      {/* Floating Action Button — opens the Tutor chat. Hidden when chat is open
+          or when locked (e.g., during a curriculum exam). */}
+      {!tutorChatOpen && !chatLocked && (
+        <button
+          onClick={() => setTutorChatOpen(true)}
+          title="Tutor Chat"
+          aria-label="Open Tutor Chat"
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:shadow-xl active:scale-95 transition-all flex items-center justify-center"
+        >
+          <MessageSquare size={22} strokeWidth={2.25} />
+        </button>
+      )}
     </main>
   );
 }

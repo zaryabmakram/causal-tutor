@@ -750,24 +750,31 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     return null;
   }, [assignMode, interactionMode, selectedNodeForPath, dSepStage, dSepNodeA, dSepNodeB, nodeLabels]);
 
+  // When the Causal Analysis side panel is open, the toolbar loses ~380px of
+  // horizontal space and starts to look crammed. Switch labeled toggle/action
+  // buttons to icon-only mode (with hover tooltips) to keep the row tidy.
+  const compactToolbar = causalPanelOpen;
+
   return (
     <div className="flex h-full w-full bg-white overflow-hidden">
       {/* Main Area */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header / Toolbar */}
         <header className="h-14 flex-shrink-0 flex items-center gap-2 px-4 bg-white border-b border-slate-200 z-20">
-          <div className="flex items-center gap-2 mr-4">
+          <div className="flex items-center gap-2 mr-4 flex-shrink-0">
             <div className="p-1.5 bg-amber-50 rounded-lg text-amber-600">
               <Share2 size={18} />
             </div>
-            <h1 className="font-bold text-slate-800 text-sm">DAG Playground</h1>
+            {!compactToolbar && (
+              <h1 className="font-bold text-slate-800 text-sm whitespace-nowrap">DAG Playground</h1>
+            )}
           </div>
 
           {/* Example dropdown */}
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
               onClick={() => setExampleDropdownOpen(!exampleDropdownOpen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
             >
               Examples <ChevronDown size={14} />
             </button>
@@ -788,10 +795,10 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           </div>
 
           {/* Add Node */}
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
               onClick={() => setShowAddNode(!showAddNode)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
             >
               <Plus size={14} /> Add Node
             </button>
@@ -833,38 +840,43 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           {/* Path select toggle */}
           <button
             onClick={togglePathMode}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
+            title="Find Paths"
+            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
               interactionMode === "path_select"
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
             }`}
           >
-            <Eye size={14} /> Find Paths
+            <Eye size={14} />
+            {!compactToolbar && <span>Find Paths</span>}
           </button>
 
           {/* D-sep toggle */}
           <button
             onClick={toggleDSepMode}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
+            title="D-Separation"
+            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
               interactionMode === "d_separation"
                 ? "bg-amber-50 text-amber-700 border-amber-200"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
             }`}
           >
             {interactionMode === "d_separation" ? <EyeOff size={14} /> : <Eye size={14} />}
-            D-Separation
+            {!compactToolbar && <span>D-Separation</span>}
           </button>
 
           {/* Causal Analysis (T/Y/Z + backdoor) */}
           <button
             onClick={() => setCausalPanelOpen(!causalPanelOpen)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
+            title="Causal Analysis"
+            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
               causalPanelOpen
                 ? "bg-indigo-50 text-indigo-700 border-indigo-200"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
             }`}
           >
-            <Target size={14} /> Causal Analysis
+            <Target size={14} />
+            {!compactToolbar && <span>Causal Analysis</span>}
           </button>
 
           <div className="h-6 w-px bg-slate-200 mx-1" />
@@ -873,10 +885,11 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           <button
             onClick={handleCheckDAG}
             disabled={analysisLoading || nodes.length < 2}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all shadow-sm"
+            title="Check my DAG"
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all shadow-sm"
           >
             {analysisLoading ? <Loader2 size={14} className="animate-spin" /> : <BrainCircuit size={14} />}
-            Check my DAG
+            {!compactToolbar && <span>Check my DAG</span>}
           </button>
 
           <div className="flex-1" />
@@ -884,7 +897,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           {/* Clear */}
           <button
             onClick={clearCanvas}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            className="flex-shrink-0 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             title="Clear canvas"
           >
             <RotateCcw size={16} />
@@ -912,8 +925,10 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           </div>
         )}
 
-        {/* React Flow Canvas */}
-        <div className="flex-1 relative">
+        {/* React Flow Canvas — overflow-hidden so absolutely-positioned nodes,
+            edge labels, and node-role badges can't visually leak past this
+            container's bounds and appear under the adjacent side panels. */}
+        <div className="flex-1 relative overflow-hidden">
           <ReactFlow
             nodes={nodes}
             edges={edges}

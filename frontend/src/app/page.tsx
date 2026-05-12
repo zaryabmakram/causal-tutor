@@ -65,15 +65,21 @@ export default function Home() {
   const storedKey = useStoredKey();
 
   // Sidebar collapse/expand state — persists across reloads.
-  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const saved = localStorage.getItem("causal_tutor_sidebar_expanded");
-    return saved === null ? true : saved === "1";
-  });
+  // Defaults to `true` on both SSR and the first client render (matching markup
+  // is what hydration requires). The mount effect below syncs from localStorage
+  // after hydration if a saved preference exists.
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(true);
+  const sidebarHydrated = useRef(false);
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("causal_tutor_sidebar_expanded", sidebarExpanded ? "1" : "0");
-    }
+    const saved = localStorage.getItem("causal_tutor_sidebar_expanded");
+    if (saved !== null) setSidebarExpanded(saved === "1");
+    sidebarHydrated.current = true;
+  }, []);
+  useEffect(() => {
+    // Don't write back on the very first render — only persist user-initiated
+    // changes after we've read the saved value.
+    if (!sidebarHydrated.current) return;
+    localStorage.setItem("causal_tutor_sidebar_expanded", sidebarExpanded ? "1" : "0");
   }, [sidebarExpanded]);
 
   // ── Unified Tutor chat state (panel + current feature context) ──
@@ -193,6 +199,7 @@ export default function Home() {
               <CurriculumDashboard
                 onContextChange={handleContextChange}
                 onChatLockedChange={handleChatLockedChange}
+                compactCards={tutorChatOpen && sidebarExpanded}
               />
           ) : activeMode === "playground" ? (
               <DAGPlayground onContextChange={handleContextChange} />

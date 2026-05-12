@@ -28,7 +28,6 @@ import {
   Eye,
   EyeOff,
   BrainCircuit,
-  MessageSquare,
   ChevronDown,
   X,
   Loader2,
@@ -48,7 +47,6 @@ import type {
   DAGAnalysisResult,
   CausalAnalysisResult,
 } from "@/types";
-import DAGChatPanel from "./DAGChatPanel";
 import CausalAnalysisPanel from "./CausalAnalysisPanel";
 import { getApiHeaders } from "@/lib/apiKey";
 import { handleAuthError } from "@/lib/apiErrors";
@@ -134,7 +132,16 @@ function toGraphPayload(nodes: Node[], edges: Edge[]) {
 
 // ── Main Component ───────────────────────────────────────────────────────
 
-export default function DAGPlayground() {
+interface DAGPlaygroundProps {
+  // Allows the parent (page.tsx) to be informed of the current graph for the
+  // unified Tutor chat panel. Optional so the component still works in isolation.
+  onContextChange?: (ctx: {
+    feature: "dag";
+    payload: { graph: { nodes: { id: string; label: string }[]; edges: { source: string; target: string }[] } };
+  }) => void;
+}
+
+export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = {}) {
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -143,7 +150,6 @@ export default function DAGPlayground() {
   const [showAddNode, setShowAddNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState("");
   const [newNodeIsLatent, setNewNodeIsLatent] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [exampleDropdownOpen, setExampleDropdownOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const addNodeInputRef = useRef<HTMLInputElement>(null);
@@ -184,6 +190,15 @@ export default function DAGPlayground() {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  // ── Publish current graph as Tutor chat context ──
+  useEffect(() => {
+    if (!onContextChange) return;
+    onContextChange({
+      feature: "dag",
+      payload: { graph: toGraphPayload(nodes, edges) },
+    });
+  }, [nodes, edges, onContextChange]);
 
   // ── Focus add-node input ──
 
@@ -875,15 +890,6 @@ export default function DAGPlayground() {
             <RotateCcw size={16} />
           </button>
 
-          {/* Chat toggle — hidden while the chat panel is already open */}
-          {!chatOpen && (
-            <button
-              onClick={() => setChatOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
-            >
-              <MessageSquare size={14} /> Chat
-            </button>
-          )}
         </header>
 
         {/* Status bar */}
@@ -1131,13 +1137,6 @@ export default function DAGPlayground() {
         loading={causalLoading}
         onRun={runCausalAnalysis}
         onClearResult={clearCausalResult}
-      />
-
-      <DAGChatPanel
-        nodes={toGraphPayload(nodes, edges).nodes}
-        edges={toGraphPayload(nodes, edges).edges}
-        isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
       />
 
       {/* Analysis Modal */}

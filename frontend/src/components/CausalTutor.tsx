@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import axios from "axios";
 import { APIAnalysisResponse } from "@/types";
 import { getApiHeaders } from "@/lib/apiKey";
 import { handleAuthError, checkAuthResponse } from "@/lib/apiErrors";
 import { apiUrl } from "@/lib/api";
-import { 
+import {
   Loader2, Paperclip, Bot, User,
   Plus, PanelRightClose, PanelRightOpen,
   LayoutDashboard, X, FileText, ArrowUp,
@@ -15,8 +15,19 @@ import {
   CheckCircle2, HelpCircle, ChevronDown, ChevronUp
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import dynamic from "next/dynamic";
+
+/** Normalize \(...\) → $...$ and \[...\] → $$...$$ for remark-math. */
+function normalizeMath(content: string): string {
+  return content
+    .replace(/\\\(/g, "$")
+    .replace(/\\\)/g, "$")
+    .replace(/\\\[/g, () => "$$")
+    .replace(/\\\]/g, () => "$$");
+}
 
 const MermaidChart = dynamic(() => import("./MermaidChart"), { ssr: false });
 
@@ -36,43 +47,98 @@ interface ChatSession {
     analysis: APIAnalysisResponse | null;
 }
 
-export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpenPlayground?: () => void; onOpenSandbox?: () => void }) {
+export default function CausalTutor({
+  onOpenPlayground,
+  onOpenSandbox,
+  skipInitialResume = false,
+}: {
+  onOpenPlayground?: () => void;
+  onOpenSandbox?: () => void;
+  /** When true, populate sidebar history but do NOT auto-restore the most
+   *  recent active session. Set by page.tsx on the very first mount of the SPA
+   *  (i.e. fresh page load / hard refresh) so Lab opens with an empty state. */
+  skipInitialResume?: boolean;
+}) {
   // State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
-  
+
   // Chat & Analysis State
   const [input, setInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [analysis, setAnalysis] = useState<APIAnalysisResponse | null>(null);
-  
+
   // Session Management
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  // True only after the mount-load effect has finished restoring from localStorage.
+  // Persist effects must wait for this; otherwise they'd run with the initial
+  // empty state and clobber the saved data before the restore takes effect.
+  const [hydrated, setHydrated] = useState(false);
+
+  // Toast feedback for the New Analysis button.
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Load sessions from localStorage on mount
+  // Load sessions + restore the previously-active session on mount.
+  // Runs every time CausalTutor mounts — including after tab-switches and reloads —
+  // so the conversation the user was in is preserved across navigation.
   useEffect(() => {
-    const saved = localStorage.getItem('causal_tutor_sessions');
-    if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            setSessions(parsed);
-        } catch (e) {
-            console.error("Failed to load sessions", e);
+    try {
+      const saved = localStorage.getItem('causal_tutor_sessions');
+      const savedCurrentId = localStorage.getItem('causal_tutor_current_session_id');
+      if (saved) {
+        const parsed: ChatSession[] = JSON.parse(saved);
+        setSessions(parsed);  // sidebar history is always populated
+        // On fresh page load (skipInitialResume=true) we leave the chat area
+        // empty — users can click any History row to resume manually. On
+        // intra-SPA tab switches the prop is false, so we restore the active
+        // session as before.
+        if (!skipInitialResume && savedCurrentId) {
+          const current = parsed.find(s => s.id === savedCurrentId);
+          if (current) {
+            setCurrentSessionId(current.id);
+            setChatHistory(current.messages || []);
+            setAnalysis(current.analysis || null);
+          }
         }
+      }
+    } catch (e) {
+      console.error("Failed to load sessions", e);
+    } finally {
+      // Unblock the persist effects below. They no-op until this fires, so they
+      // can't clobber the saved data with the initial empty state on first render.
+      setHydrated(true);
     }
+    // skipInitialResume is captured at first render and intentionally not in deps —
+    // we only want this restore logic on the initial mount, never again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save sessions to localStorage whenever they change
+  // Save sessions to localStorage whenever they change (after hydration)
   useEffect(() => {
+    if (!hydrated) return;
     localStorage.setItem('causal_tutor_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+  }, [sessions, hydrated]);
+
+  // Persist the active session id so we can restore it on remount (after hydration)
+  useEffect(() => {
+    if (!hydrated) return;
+    if (currentSessionId) {
+      localStorage.setItem('causal_tutor_current_session_id', currentSessionId);
+    } else {
+      localStorage.removeItem('causal_tutor_current_session_id');
+    }
+  }, [currentSessionId, hydrated]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -92,10 +158,13 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
   };
 
   const createNewSession = () => {
-    // If current session is empty, don't create a new one, just reset
-    if (chatHistory.length === 0 && !analysis) return;
+    // Nothing to clear — let the user know they're already on a fresh slate.
+    if (chatHistory.length === 0 && !analysis) {
+      showToast("You're already on a fresh analysis. Pick one from History to resume an earlier session.");
+      return;
+    }
 
-    // Save current session before clearing if it has content
+    // Save current session before clearing
     if (currentSessionId) {
         updateSession(currentSessionId, { messages: chatHistory, analysis });
     }
@@ -106,21 +175,18 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
     setFile(null);
     setIsContextPanelOpen(false);
     setCurrentSessionId(null);
+    showToast("Started a new analysis. Your previous session is saved in History.");
   };
 
   const loadSession = (session: ChatSession) => {
-    // Save current if needed
     if (currentSessionId && currentSessionId !== session.id) {
          updateSession(currentSessionId, { messages: chatHistory, analysis });
     }
-
     setCurrentSessionId(session.id);
     setChatHistory(session.messages);
     setAnalysis(session.analysis);
     setIsContextPanelOpen(!!session.analysis); // Open context if analysis exists
-    
-    // On mobile, close sidebar after selection
-    if (window.innerWidth < 768) setIsSidebarOpen(false);
+    if (typeof window !== "undefined" && window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   const deleteSession = (e: React.MouseEvent, id: string) => {
@@ -128,7 +194,12 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
       const newSessions = sessions.filter(s => s.id !== id);
       setSessions(newSessions);
       if (currentSessionId === id) {
-          createNewSession();
+          // Active session was deleted — reset live state too.
+          setChatHistory([]);
+          setAnalysis(null);
+          setFile(null);
+          setIsContextPanelOpen(false);
+          setCurrentSessionId(null);
       }
   };
 
@@ -147,7 +218,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
         sessionId = Date.now().toString();
         const newSession: ChatSession = {
             id: sessionId,
-            title: file ? file.name : (input.slice(0, 30) || "New Analysis"),
+            title: file ? file.name : (input.slice(0, 30) || "New Chat"),
             timestamp: Date.now(),
             messages: [],
             analysis: null
@@ -290,14 +361,14 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
 
   return (
     <div className="flex h-screen w-full bg-white text-slate-900 font-sans overflow-hidden">
-      
-      {/* 1. LEFT SIDEBAR (Navigation) */}
-      <div 
+
+      {/* 1. LEFT SIDEBAR — Analysis history */}
+      <div
         className={`${isSidebarOpen ? 'w-[260px] translate-x-0' : 'w-0 -translate-x-full'} bg-slate-50 border-r border-slate-200 flex-shrink-0 transition-all duration-300 ease-in-out flex flex-col overflow-hidden relative h-full z-30`}
       >
         {/* Sidebar Header */}
         <div className="p-4 flex items-center justify-between">
-            <button 
+            <button
                 onClick={() => setIsSidebarOpen(false)}
                 className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors md:hidden absolute right-2 top-2"
             >
@@ -311,10 +382,11 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
             </div>
         </div>
 
-        {/* New Chat Button */}
+        {/* New Analysis Button */}
         <div className="px-3 mb-4">
-            <button 
+            <button
                 onClick={createNewSession}
+                title="Start a new analysis. Your current session is saved in History."
                 className="flex items-center justify-center gap-2 px-3 py-2.5 w-full bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg transition-all text-sm font-medium text-slate-700 shadow-sm group"
             >
                 <Plus size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
@@ -322,12 +394,12 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
             </button>
         </div>
 
-        {/* History List */}
+        {/* Analysis History List */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 custom-scrollbar">
-            <div className="text-[10px] font-bold text-slate-400 px-3 mb-2 uppercase tracking-wider">History</div>
+            <div className="text-[10px] font-bold text-slate-400 px-3 mb-2 uppercase tracking-wider">Analysis History</div>
             {sessions.length > 0 ? (
                 sessions.map(session => (
-                    <div 
+                    <div
                         key={session.id}
                         className={`group flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm truncate transition-colors cursor-pointer border ${currentSessionId === session.id ? 'bg-white border-slate-200 shadow-sm' : 'border-transparent hover:bg-slate-200/50'}`}
                         onClick={() => loadSession(session)}
@@ -336,7 +408,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
                         <span className={`truncate font-medium flex-1 ${currentSessionId === session.id ? 'text-slate-800' : 'text-slate-600'}`}>
                             {session.title}
                         </span>
-                        <button 
+                        <button
                             onClick={(e) => deleteSession(e, session.id)}
                             className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-300 rounded text-slate-400 hover:text-red-500 transition-all"
                         >
@@ -354,7 +426,7 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
 
       {/* 2. MAIN CHAT AREA */}
       <div className="flex-1 flex flex-col h-full min-w-0 bg-white relative">
-        
+
         {/* Header */}
         <header className="h-14 flex-shrink-0 flex items-center justify-between px-4 sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-transparent transition-all">
             <div className="flex items-center gap-2">
@@ -450,14 +522,16 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
                                         <AnalysisReportBlock data={msg.data} />
                                     ) : (
                                         <div className="prose prose-slate prose-p:leading-7 prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 max-w-none text-[15px] text-slate-800 break-words font-normal">
-                                            <ReactMarkdown 
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkMath]}
+                                                rehypePlugins={[rehypeKatex]}
                                                 components={{
                                                     code: ({node, ...props}) => <code className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-sm font-mono border border-slate-200" {...props} />,
                                                     h3: ({node, ...props}) => <h3 className="text-lg font-bold text-slate-900 mt-4 mb-2" {...props} />,
                                                     blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-indigo-200 pl-4 italic text-slate-600 my-2" {...props} />
                                                 }}
                                             >
-                                                {msg.content}
+                                                {normalizeMath(msg.content)}
                                             </ReactMarkdown>
                                         </div>
                                     )}
@@ -629,6 +703,15 @@ export default function CausalTutor({ onOpenPlayground, onOpenSandbox }: { onOpe
                   </div>
               </div>
           </div>
+      )}
+
+      {/* Toast — confirms New Analysis clicks */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium shadow-2xl max-w-md text-center">
+            {toast}
+          </div>
+        </div>
       )}
 
     </div>

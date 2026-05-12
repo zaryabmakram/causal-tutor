@@ -9,7 +9,16 @@ import { apiUrl } from "@/lib/api";
 
 const MermaidChart = dynamic(() => import("./MermaidChart"), { ssr: false });
 
-export default function CurriculumDashboard() {
+interface CurriculumDashboardProps {
+    // Lets parent (page.tsx) know what's being studied so the unified Tutor
+    // chat can ask the bot relevant questions about the current method.
+    onContextChange?: (ctx: { feature: "curriculum"; payload: any }) => void;
+    // Tells the parent to lock the Tutor chat (hide FAB + close panel) when the
+    // student is mid-exam, to keep the assessment honest.
+    onChatLockedChange?: (locked: boolean) => void;
+}
+
+export default function CurriculumDashboard({ onContextChange, onChatLockedChange }: CurriculumDashboardProps = {}) {
     const [methods, setMethods] = useState<any[]>([]);
     const [selectedMethod, setSelectedMethod] = useState<any | null>(null);
     const [viewMode, setViewMode] = useState<"grid" | "theory" | "exam">("grid");
@@ -42,6 +51,35 @@ export default function CurriculumDashboard() {
         };
         fetchMethods();
     }, []);
+
+    // Publish current viewing context up so the unified Tutor chat can use it.
+    useEffect(() => {
+        if (!onContextChange) return;
+        if (selectedMethod && viewMode === "theory") {
+            onContextChange({
+                feature: "curriculum",
+                payload: {
+                    methodTitle: selectedMethod.title,
+                    description: selectedMethod.description,
+                    assumptions: selectedMethod.key_assumptions,
+                    example: selectedMethod.example_scenario,
+                },
+            });
+        } else {
+            onContextChange({
+                feature: "curriculum",
+                payload: { overview: methods.map((m: any) => m.title).join(", ") },
+            });
+        }
+    }, [selectedMethod, viewMode, methods, onContextChange]);
+
+    // Lock the Tutor chat while the user is taking an exam.
+    useEffect(() => {
+        if (!onChatLockedChange) return;
+        onChatLockedChange(viewMode === "exam");
+        // On unmount, ensure the lock is released so other modes aren't accidentally locked.
+        return () => onChatLockedChange(false);
+    }, [viewMode, onChatLockedChange]);
 
     const startTheory = (method: any) => {
         setSelectedMethod(method);

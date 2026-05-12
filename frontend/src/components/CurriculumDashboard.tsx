@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { BookOpen, GraduationCap, PlayCircle, Loader2, ArrowLeft, CheckCircle2, ChevronRight } from "lucide-react";
+import { BookOpen, GraduationCap, PlayCircle, Loader2, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft, XCircle, Check, RotateCcw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { getApiHeaders } from "@/lib/apiKey";
 import { checkAuthResponse } from "@/lib/apiErrors";
@@ -27,7 +27,14 @@ export default function CurriculumDashboard({ onContextChange, onChatLockedChang
     const [viewMode, setViewMode] = useState<"grid" | "theory" | "exam">("grid");
     const [examQuestions, setExamQuestions] = useState<any[]>([]);
     const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0);
-    const [score, setScore] = useState(0);
+    // One slot per question; null means "not answered yet". Replaces the
+    // running score so users can navigate back and change answers.
+    const [userAnswers, setUserAnswers] = useState<(number | null)[]>([]);
+    // Captured at exam start so the result-screen "Retake exam" button can
+    // re-run startExam without depending on `selectedMethod` (which is only
+    // set via the theory view, not when launching from the grid tile).
+    const [examMethodId, setExamMethodId] = useState<string | null>(null);
+    const [examMethodTitle, setExamMethodTitle] = useState<string | null>(null);
     const [showResult, setShowResult] = useState(false);
     const [loadingExam, setLoadingExam] = useState<string | null>(null);
     const [loadingTheory, setLoadingTheory] = useState(true);
@@ -102,9 +109,11 @@ export default function CurriculumDashboard({ onContextChange, onChatLockedChang
             }
             const data = await res.json();
             setExamQuestions(data.questions);
+            setUserAnswers(new Array(data.questions.length).fill(null));
+            setExamMethodId(methodId);
+            setExamMethodTitle(methodTitle);
             setViewMode("exam");
             setCurrentQuestionIdx(0);
-            setScore(0);
             setShowResult(false);
         } catch (e) {
             console.error(e);
@@ -115,63 +124,152 @@ export default function CurriculumDashboard({ onContextChange, onChatLockedChang
         }
     };
 
-    const handleAnswer = (optionIndex: number) => {
-        const correct = examQuestions[currentQuestionIdx].correct_option_index;
-        if (optionIndex === correct) setScore(s => s + 1);
-        
-        if (currentQuestionIdx + 1 < examQuestions.length) {
-            setCurrentQuestionIdx(i => i + 1);
-        } else {
-            setShowResult(true);
-        }
+    const selectAnswer = (optionIndex: number) => {
+        setUserAnswers(prev => prev.map((a, i) => i === currentQuestionIdx ? optionIndex : a));
     };
+    const goPrev = () => setCurrentQuestionIdx(i => Math.max(0, i - 1));
+    const goNext = () => setCurrentQuestionIdx(i => Math.min(examQuestions.length - 1, i + 1));
+    const finishExam = () => setShowResult(true);
 
     if (viewMode === "exam" && examQuestions.length > 0) {
         if (showResult) {
+            const score = userAnswers.reduce(
+                (acc: number, a, i) => acc + (a === examQuestions[i]?.correct_option_index ? 1 : 0),
+                0
+            );
+            const total = examQuestions.length;
+            const pct = total > 0 ? score / total : 0;
+            const wrong = examQuestions
+                .map((q, i) => ({ q, i, picked: userAnswers[i] as number }))
+                .filter(({ q, picked }) => picked !== q.correct_option_index);
+            const tone = pct >= 0.8
+                ? { bg: "bg-emerald-100", text: "text-emerald-600" }
+                : pct >= 0.5
+                    ? { bg: "bg-amber-100", text: "text-amber-600" }
+                    : { bg: "bg-rose-100", text: "text-rose-600" };
+
             return (
-                <div className="flex flex-col items-center justify-center h-full p-8 bg-slate-50 animate-in fade-in">
-                    <div className="bg-white p-8 rounded-3xl shadow-xl max-w-lg w-full text-center border border-slate-200">
-                        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <GraduationCap size={40} className="text-emerald-600" />
+                <div className="flex flex-col h-full p-6 bg-slate-50 animate-in fade-in overflow-hidden">
+                    <div className="bg-white rounded-3xl shadow-xl max-w-3xl w-full mx-auto border border-slate-200 flex flex-col overflow-hidden flex-1">
+                        <div className="p-8 text-center border-b border-slate-100">
+                            <div className={`w-20 h-20 ${tone.bg} rounded-full flex items-center justify-center mx-auto mb-6`}>
+                                <GraduationCap size={40} className={tone.text} />
+                            </div>
+                            <h2 className="text-2xl font-bold text-slate-900 mb-2">Exam Complete!</h2>
+                            <p className="text-slate-500">
+                                You scored <span className="font-bold text-slate-900">{score} / {total}</span>
+                            </p>
                         </div>
-                        <h2 className="text-3xl font-bold text-slate-900 mb-2">Exam Complete!</h2>
-                        <p className="text-slate-500 mb-8">You scored <span className="font-bold text-slate-900">{score} / {examQuestions.length}</span></p>
-                        
-                        <button 
-                            onClick={() => setViewMode("grid")}
-                            className="w-full py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors"
-                        >
-                            Return to Curriculum
-                        </button>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar px-8 py-6">
+                            {wrong.length === 0 ? (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-emerald-700">
+                                    <CheckCircle2 size={18} />
+                                    Perfect score — nothing to review.
+                                </div>
+                            ) : (
+                                <>
+                                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                                        Review your mistakes ({wrong.length})
+                                    </h3>
+                                    <div className="space-y-4">
+                                        {wrong.map(({ q, i, picked }) => (
+                                            <WrongQuestionCard key={i} index={i} question={q} picked={picked} />
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="border-t border-slate-100 p-6 flex gap-3">
+                            <button
+                                onClick={() => examMethodId && examMethodTitle && startExam(examMethodId, examMethodTitle)}
+                                disabled={!examMethodId || loadingExam !== null}
+                                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                            >
+                                {loadingExam ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+                                Retake exam
+                            </button>
+                            <button
+                                onClick={() => setViewMode("grid")}
+                                className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors"
+                            >
+                                Return to Curriculum
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
         }
 
         const q = examQuestions[currentQuestionIdx];
+        const currentPick = userAnswers[currentQuestionIdx];
+        const answeredCount = userAnswers.filter(a => a !== null).length;
+        const isLast = currentQuestionIdx === examQuestions.length - 1;
+        const allAnswered = userAnswers.every(a => a !== null);
+
         return (
             <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
                 <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
                     <span className="font-bold text-slate-700">Exam Mode</span>
                     <span className="text-sm bg-slate-100 px-3 py-1 rounded-full text-slate-600">Question {currentQuestionIdx + 1} / {examQuestions.length}</span>
                 </header>
-                
+
                 <div className="flex-1 flex items-center justify-center p-6">
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 max-w-2xl w-full overflow-hidden">
                         <div className="p-8">
                             <h3 className="text-xl font-semibold text-slate-900 mb-6 leading-relaxed">{q.question_text}</h3>
                             <div className="space-y-3">
-                                {q.options.map((opt: string, idx: number) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => handleAnswer(idx)}
-                                        className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50 transition-all text-slate-700 font-medium"
-                                    >
-                                        <span className="inline-block w-6 font-bold text-slate-400 mr-2">{String.fromCharCode(65 + idx)}.</span>
-                                        {opt}
-                                    </button>
-                                ))}
+                                {q.options.map((opt: string, idx: number) => {
+                                    const selected = currentPick === idx;
+                                    return (
+                                        <button
+                                            key={idx}
+                                            onClick={() => selectAnswer(idx)}
+                                            className={`w-full text-left p-4 rounded-xl border transition-all font-medium ${
+                                                selected
+                                                    ? "bg-indigo-50 border-indigo-400 text-indigo-700 ring-2 ring-indigo-100"
+                                                    : "border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/50"
+                                            }`}
+                                        >
+                                            <span className={`inline-block w-6 font-bold mr-2 ${selected ? "text-indigo-500" : "text-slate-400"}`}>
+                                                {String.fromCharCode(65 + idx)}.
+                                            </span>
+                                            {opt}
+                                        </button>
+                                    );
+                                })}
                             </div>
+                        </div>
+
+                        <div className="px-8 pb-6 pt-4 flex items-center justify-between gap-3 border-t border-slate-100">
+                            <button
+                                onClick={goPrev}
+                                disabled={currentQuestionIdx === 0}
+                                className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                            >
+                                <ChevronLeft size={16} /> Previous
+                            </button>
+                            <span className="text-xs text-slate-500">
+                                {answeredCount} / {examQuestions.length} answered
+                            </span>
+                            {!isLast ? (
+                                <button
+                                    onClick={goNext}
+                                    disabled={currentPick === null}
+                                    className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-black disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                >
+                                    Next <ChevronRight size={16} />
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={finishExam}
+                                    disabled={!allAnswered}
+                                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                >
+                                    Submit exam
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -358,6 +456,58 @@ export default function CurriculumDashboard({ onContextChange, onChatLockedChang
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+function WrongQuestionCard({ index, question, picked }: { index: number; question: any; picked: number }) {
+    const correct = question.correct_option_index;
+    return (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-left">
+            <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 border border-slate-100 px-2 py-0.5 rounded">
+                    Question {index + 1}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                    <XCircle size={12} /> Incorrect
+                </span>
+            </div>
+
+            <p className="text-sm font-medium text-slate-900 leading-relaxed mb-3">{question.question_text}</p>
+
+            <div className="space-y-2 mb-3">
+                {question.options.map((opt: string, idx: number) => {
+                    const isCorrect = idx === correct;
+                    const isPicked = idx === picked;
+                    let cls = "bg-slate-50 text-slate-600 border-slate-100";
+                    let icon = null;
+                    let tag = null;
+                    if (isCorrect) {
+                        cls = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                        icon = <Check size={14} className="text-emerald-600 flex-shrink-0" />;
+                        tag = <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-emerald-700">Correct answer</span>;
+                    } else if (isPicked) {
+                        cls = "bg-rose-50 text-rose-800 border-rose-200";
+                        icon = <XCircle size={14} className="text-rose-600 flex-shrink-0" />;
+                        tag = <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-rose-700">Your answer</span>;
+                    }
+                    return (
+                        <div key={idx} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${cls}`}>
+                            {icon || <span className="w-3.5 flex-shrink-0" />}
+                            <span className="font-bold w-5">{String.fromCharCode(65 + idx)}.</span>
+                            <span className="flex-1">{opt}</span>
+                            {tag}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {question.explanation && (
+                <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                    <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider mb-1">Why</div>
+                    <p className="text-xs text-slate-700 leading-relaxed">{question.explanation}</p>
+                </div>
+            )}
         </div>
     );
 }

@@ -166,11 +166,20 @@ export default function CurriculumDashboard() {
                                 <option value={20}>20 Qs</option>
                             </select>
                         </div>
-                        <button 
+                        <button
                             onClick={() => startExam(selectedMethod.id, selectedMethod.title)}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                            disabled={loadingExam === selectedMethod.id}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                         >
-                            <PlayCircle size={16} /> Take Exam
+                            {loadingExam === selectedMethod.id ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin" /> Generating…
+                                </>
+                            ) : (
+                                <>
+                                    <PlayCircle size={16} /> Take Exam
+                                </>
+                            )}
                         </button>
                     </div>
                 </header>

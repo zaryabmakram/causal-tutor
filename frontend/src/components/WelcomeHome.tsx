@@ -139,25 +139,67 @@ function HeroDAG() {
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#818cf8" />
         </marker>
       </defs>
-      {/* X → Z: line ends just outside Z (r=22 at 110,40) so the arrowhead tip touches the boundary */}
-      <line x1="71" y1="110" x2="99" y2="60" stroke="#818cf8" strokeWidth="1.5" markerEnd="url(#welcome-hero-arrow)" />
-      {/* Y → Z: same, from the right node */}
-      <line x1="149" y1="110" x2="121" y2="60" stroke="#818cf8" strokeWidth="1.5" markerEnd="url(#welcome-hero-arrow)" />
-      {/* Dashed X ⋯ Y: endpoints sit on each node's outer edge */}
-      <line x1="84" y1="130" x2="136" y2="130" stroke="#94a3b8" strokeWidth="1.2" strokeDasharray="3 3" />
+
+      {/* Z → X */}
+      <line
+        x1="110"
+        y1="40"
+        x2="60"
+        y2="130"
+        stroke="#818cf8"
+        strokeWidth="1.5"
+        markerEnd="url(#welcome-hero-arrow)"
+      />
+
+      {/* Z → Y */}
+      <line
+        x1="110"
+        y1="40"
+        x2="160"
+        y2="130"
+        stroke="#818cf8"
+        strokeWidth="1.5"
+        markerEnd="url(#welcome-hero-arrow)"
+      />
+
+      {/* Dashed X ⋯ Y: association */}
+      <line
+        x1="84"
+        y1="130"
+        x2="136"
+        y2="130"
+        stroke="#94a3b8"
+        strokeWidth="1.2"
+        strokeDasharray="3 3"
+      />
+
+      {/* Z node */}
       <g>
         <circle cx="110" cy="40" r="22" fill="#e0e7ff" />
-        <text x="110" y="45" textAnchor="middle" fontSize="14" fontWeight="500" fill="#4338ca">Z</text>
+        <text x="110" y="45" textAnchor="middle" fontSize="14" fontWeight="500" fill="#4338ca">
+          Z
+        </text>
       </g>
+
+      {/* X node */}
       <g>
         <circle cx="60" cy="130" r="22" fill="#cffafe" />
-        <text x="60" y="135" textAnchor="middle" fontSize="14" fontWeight="500" fill="#0e7490">X</text>
+        <text x="60" y="135" textAnchor="middle" fontSize="14" fontWeight="500" fill="#0e7490">
+          X
+        </text>
       </g>
+
+      {/* Y node */}
       <g>
         <circle cx="160" cy="130" r="22" fill="#ffe4e6" />
-        <text x="160" y="135" textAnchor="middle" fontSize="14" fontWeight="500" fill="#be123c">Y</text>
+        <text x="160" y="135" textAnchor="middle" fontSize="14" fontWeight="500" fill="#be123c">
+          Y
+        </text>
       </g>
-      <text x="110" y="165" textAnchor="middle" fontSize="10" fill="#94a3b8">Does X really cause Y?</text>
+
+      <text x="110" y="165" textAnchor="middle" fontSize="10" fill="#94a3b8">
+        Does X really cause Y?
+      </text>
     </svg>
   );
 }

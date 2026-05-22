@@ -8,7 +8,7 @@ import TutorChatPanel, { type TutorFeature } from "@/components/TutorChatPanel";
 import WelcomeHome from "@/components/WelcomeHome";
 import {
   Home as HomeIcon, BookOpen, FlaskConical, Share2, Database, KeyRound, MessageSquare,
-  BrainCircuit, PanelLeftClose, PanelLeftOpen,
+  BrainCircuit, PanelLeftClose, PanelLeftOpen, Bug, Lightbulb, Mail, ExternalLink, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useStoredKey } from "@/lib/apiKey";
@@ -66,12 +66,114 @@ function SidebarNavButton({
   );
 }
 
+const BUG_REPORT_URL =
+  "https://github.com/causalNLP/causal-tutor/issues/new?labels=bug&template=bug_report.md";
+const FEATURE_REQUEST_URL =
+  "https://github.com/causalNLP/causal-tutor/issues/new?labels=enhancement&template=feature_request.md";
+const SUPPORT_EMAIL_URL = "mailto:zaryabmakram@gmail.com?subject=Causal%20Tutor%20Feedback";
+
+function ReportIssuePopover({ onClose }: { onClose: () => void }) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const options = [
+    {
+      href: BUG_REPORT_URL,
+      title: "Report a bug",
+      description: "Open a GitHub issue for broken behavior.",
+      icon: Bug,
+      external: true,
+    },
+    {
+      href: FEATURE_REQUEST_URL,
+      title: "Request a feature",
+      description: "Suggest an improvement or new workflow.",
+      icon: Lightbulb,
+      external: true,
+    },
+    {
+      href: SUPPORT_EMAIL_URL,
+      title: "Email support",
+      description: "Send feedback directly through email.",
+      icon: Mail,
+      external: false,
+    },
+  ];
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const t = setTimeout(() => document.addEventListener("mousedown", onClick), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={popoverRef}
+      className="absolute left-full ml-2 bottom-4 w-[320px] bg-white border border-slate-200 rounded-2xl shadow-2xl z-[60] p-3 animate-in fade-in slide-in-from-left-2 duration-200"
+    >
+      <div className="flex items-center justify-between px-1 pb-2 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-rose-50 rounded-lg text-rose-600">
+            <Bug size={16} />
+          </div>
+          <div>
+            <div className="font-bold text-sm text-slate-900">Report issue</div>
+            <div className="text-[11px] text-slate-500">Bugs, feature requests, and support</div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors"
+          aria-label="Close report options"
+        >
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="pt-2 space-y-1">
+        {options.map((option) => {
+          const Icon = option.icon;
+          return (
+            <a
+              key={option.title}
+              href={option.href}
+              target={option.external ? "_blank" : undefined}
+              rel={option.external ? "noopener noreferrer" : undefined}
+              onClick={onClose}
+              className="group flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-50 transition-colors"
+            >
+              <span className="mt-0.5 w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0 group-hover:bg-rose-50 group-hover:text-rose-600 transition-colors">
+                <Icon size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                  {option.title}
+                  {option.external && <ExternalLink size={12} className="text-slate-400" />}
+                </span>
+                <span className="block text-xs text-slate-500 leading-relaxed mt-0.5">
+                  {option.description}
+                </span>
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const DAGPlayground = dynamic(() => import("@/components/DAGPlayground"), { ssr: false });
 const DatasetSandbox = dynamic(() => import("@/components/DatasetSandbox"), { ssr: false });
 
 export default function Home() {
   const [activeMode, setActiveMode] = useState<"home" | "lab" | "curriculum" | "playground" | "sandbox">("home");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const storedKey = useStoredKey();
 
   // Sidebar collapse/expand state — persists across reloads.
@@ -191,18 +293,34 @@ export default function Home() {
           <SidebarNavButton icon={FlaskConical} label="Research Lab" active={activeMode === 'lab'} onClick={() => setActiveMode('lab')} accent="text-indigo-400" expanded={effectivelyExpanded} disabled={navLocked} />
         </div>
 
-        {/* Bottom: API key settings */}
-        <div className={`${effectivelyExpanded ? 'px-2' : ''}`}>
+        {/* Bottom: support + API key settings */}
+        <div className={`relative flex flex-col gap-1.5 ${effectivelyExpanded ? 'px-2' : ''}`}>
+          <SidebarNavButton
+            icon={Bug}
+            label="Report issue"
+            active={reportOpen}
+            onClick={() => {
+              setReportOpen((v) => !v);
+              setApiKeyOpen(false);
+            }}
+            accent="text-rose-400"
+            expanded={effectivelyExpanded}
+            disabled={navLocked}
+          />
           <SidebarNavButton
             icon={KeyRound}
             label="OpenAI API Key"
             active={apiKeyOpen}
-            onClick={() => setApiKeyOpen((v) => !v)}
+            onClick={() => {
+              setApiKeyOpen((v) => !v);
+              setReportOpen(false);
+            }}
             accent="text-indigo-400"
             expanded={effectivelyExpanded}
             disabled={navLocked}
             dot={storedKey ? 'bg-emerald-400' : 'bg-slate-500'}
           />
+          {reportOpen && !navLocked && <ReportIssuePopover onClose={() => setReportOpen(false)} />}
         </div>
 
         <ApiKeySettings isOpen={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />

@@ -25,6 +25,7 @@ import {
   Plus,
   Trash2,
   Share2,
+  BookOpen,
   Eye,
   EyeOff,
   BrainCircuit,
@@ -120,6 +121,113 @@ function DAGNode({ data, selected }: NodeProps) {
 }
 
 const nodeTypes: NodeTypes = { dagNode: DAGNode };
+const DAG_BASICS_SEEN_KEY = "causal-tutor-dag-basics-seen";
+
+function DAGBasicsPanel({
+  onAddNode,
+  onOpenExamples,
+  onDismiss,
+}: {
+  onAddNode: () => void;
+  onOpenExamples: () => void;
+  onDismiss: () => void;
+}) {
+  const concepts = [
+    {
+      title: "What is a DAG?",
+      body: "A Directed Acyclic Graph is a map of your causal assumptions. Nodes are variables; arrows say one variable is assumed to directly cause another.",
+    },
+    {
+      title: "Why acyclic?",
+      body: "A DAG cannot contain a loop. If A causes B and B causes C, C cannot point back to A in the same graph.",
+    },
+    {
+      title: "Why use one?",
+      body: "DAGs help you spot confounders, avoid bad adjustment choices, explain misleading correlations, and decide which assumptions your analysis needs.",
+    },
+    {
+      title: "What are latent variables?",
+      body: "Latent variables are hidden or unobserved causes. They matter because an unseen common cause can make two variables move together without one causing the other.",
+    },
+  ];
+
+  const steps = [
+    "Add variables as nodes.",
+    "Draw arrows based on domain knowledge.",
+    "Mark hidden causes as latent.",
+    "Use paths and d-separation to inspect assumptions.",
+    "Run Causal Analysis or Check my DAG for feedback.",
+  ];
+
+  return (
+    <div className="w-[min(860px,calc(100vw-3rem))] max-h-[min(78vh,680px)] overflow-y-auto custom-scrollbar bg-white border border-slate-200 rounded-2xl shadow-xl">
+      <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-5">
+        <div className="flex items-start gap-3">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center flex-shrink-0">
+            <BookOpen size={24} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">DAG basics</h2>
+            <p className="text-base text-slate-500 leading-relaxed mt-1.5">
+              Use this canvas to make your causal assumptions visible before you estimate effects.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          title="Dismiss DAG basics"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="p-6 grid grid-cols-1 md:grid-cols-[1.45fr_1fr] gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {concepts.map((concept) => (
+            <div key={concept.title} className="border border-slate-200 rounded-xl p-4 bg-slate-50/60">
+              <p className="text-base font-semibold text-slate-900 mb-1.5">{concept.title}</p>
+              <p className="text-sm text-slate-500 leading-relaxed">{concept.body}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="border border-amber-100 bg-amber-50/70 rounded-xl p-5">
+          <p className="text-base font-semibold text-slate-900 mb-4">How to use this canvas</p>
+          <ol className="space-y-2.5">
+            {steps.map((step, index) => (
+              <li key={step} className="flex gap-2.5 text-sm text-slate-600 leading-relaxed">
+                <span className="mt-0.5 w-6 h-6 rounded-full bg-white border border-amber-200 text-amber-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {index + 1}
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-5 grid grid-cols-1 gap-2.5">
+            <button
+              type="button"
+              onClick={onOpenExamples}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-black transition-colors"
+            >
+              <Share2 size={16} />
+              Load example
+            </button>
+            <button
+              type="button"
+              onClick={onAddNode}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+            >
+              <Plus size={16} />
+              Add first node
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -151,6 +259,8 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   const [newNodeLabel, setNewNodeLabel] = useState("");
   const [newNodeIsLatent, setNewNodeIsLatent] = useState(false);
   const [exampleDropdownOpen, setExampleDropdownOpen] = useState(false);
+  const [showBasicsPanel, setShowBasicsPanel] = useState(false);
+  const [basicsDismissed, setBasicsDismissed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const addNodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -205,6 +315,16 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   useEffect(() => {
     if (showAddNode) addNodeInputRef.current?.focus();
   }, [showAddNode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hasSeenBasics = window.localStorage.getItem(DAG_BASICS_SEEN_KEY) === "true";
+    if (!hasSeenBasics) {
+      setShowBasicsPanel(true);
+    } else {
+      setBasicsDismissed(true);
+    }
+  }, []);
 
   // ── Sync T/Y/Z roles into node data so badges render ──
   useEffect(() => {
@@ -392,8 +512,39 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     setNodes(rfNodes);
     setEdges(rfEdges);
     setExampleDropdownOpen(false);
+    setShowBasicsPanel(false);
+    setBasicsDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DAG_BASICS_SEEN_KEY, "true");
+    }
     clearAllAnalysis();
     showToast(`Loaded: ${example.name}`);
+  };
+
+  const openAddNodeFromBasics = () => {
+    setShowAddNode(true);
+    setShowBasicsPanel(false);
+    setBasicsDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DAG_BASICS_SEEN_KEY, "true");
+    }
+  };
+
+  const openExamplesFromBasics = () => {
+    setShowBasicsPanel(false);
+    setBasicsDismissed(true);
+    setExampleDropdownOpen(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DAG_BASICS_SEEN_KEY, "true");
+    }
+  };
+
+  const dismissBasics = () => {
+    setShowBasicsPanel(false);
+    setBasicsDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DAG_BASICS_SEEN_KEY, "true");
+    }
   };
 
   // ── Clear canvas ──
@@ -754,6 +905,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   // horizontal space and starts to look crammed. Switch labeled toggle/action
   // buttons to icon-only mode (with hover tooltips) to keep the row tidy.
   const compactToolbar = causalPanelOpen;
+  const basicsPanelVisible = showBasicsPanel && (nodes.length === 0 || basicsDismissed);
 
   return (
     <div className="flex h-full w-full bg-white overflow-hidden">
@@ -769,6 +921,22 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
               <h1 className="font-bold text-slate-800 text-sm whitespace-nowrap">DAG Playground</h1>
             )}
           </div>
+
+          <button
+            onClick={() => {
+              setShowBasicsPanel(true);
+              setBasicsDismissed(true);
+            }}
+            title="DAG basics"
+            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm border ${
+              basicsPanelVisible
+                ? "bg-amber-50 text-amber-700 border-amber-200"
+                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
+            }`}
+          >
+            <BookOpen size={14} />
+            {!compactToolbar && <span>Basics</span>}
+          </button>
 
           {/* Example dropdown */}
           <div className="relative flex-shrink-0">
@@ -953,10 +1121,22 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
             />
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#e2e8f0" />
 
-            {/* Empty state */}
-            {nodes.length === 0 && (
+            {basicsPanelVisible && (
               <Panel position="top-center">
-                <div className="mt-40 text-center animate-in fade-in duration-500">
+                <div className="mt-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <DAGBasicsPanel
+                    onAddNode={openAddNodeFromBasics}
+                    onOpenExamples={openExamplesFromBasics}
+                    onDismiss={dismissBasics}
+                  />
+                </div>
+              </Panel>
+            )}
+
+            {/* Empty state */}
+            {nodes.length === 0 && !basicsPanelVisible && (
+              <Panel position="top-center">
+                <div className="mt-32 text-center animate-in fade-in duration-500">
                   <Share2 size={48} className="mx-auto text-slate-200 mb-4" />
                   <h2 className="text-xl font-bold text-slate-400 mb-2">Build Your Causal DAG</h2>
                   <p className="text-sm text-slate-400 max-w-sm">

@@ -1,12 +1,10 @@
 import json
-import os
 import math
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
 import pandas as pd
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 from .sandbox_models import (
@@ -14,17 +12,23 @@ from .sandbox_models import (
     VariableSelection, EstimateResponse, GroundTruthComparison,
     InterpretRequest, SandboxIssue,
 )
+from .llm_provider import (
+    LLMProvider,
+    build_async_client,
+    env_key_for,
+    resolve_model,
+)
 
 load_dotenv()
 
 
-def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+def _get_client(provider: LLMProvider, api_key: Optional[str] = None):
     """Build a per-request OpenAI client. Endpoints in main.py reject requests
     that don't supply an API key (`_require_api_key`) before reaching this function."""
-    effective = api_key or os.getenv("OPENAI_API_KEY")
+    effective = api_key or env_key_for(provider)
     if not effective:
-        raise RuntimeError("OpenAI API key not provided.")
-    return AsyncOpenAI(api_key=effective)
+        raise RuntimeError("LLM API key not provided.")
+    return build_async_client(provider, effective)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CURATED_JSON = DATA_DIR / "curated_queries.json"
@@ -1166,7 +1170,12 @@ Style:
 """
 
 
-async def interpret_result(req: InterpretRequest, api_key: Optional[str] = None):
+async def interpret_result(
+    req: InterpretRequest,
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+):
     result = req.result
     warnings_block = "\n".join(f"- {w}" for w in result.warnings) or "(none)"
     assumptions_block = "\n".join(f"- {a}" for a in result.assumptions)
@@ -1194,8 +1203,8 @@ Identifying assumptions for {result.method.upper()}:
 {assumptions_block}
 """
 
-    completion = await _get_client(api_key).chat.completions.create(
-        model="gpt-4o",
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o"),
         messages=[
             {"role": "system", "content": INTERPRET_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},

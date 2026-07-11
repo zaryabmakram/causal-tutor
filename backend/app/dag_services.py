@@ -1,10 +1,8 @@
 import json
-import os
 from typing import List, Optional
 from itertools import combinations
 
 import networkx as nx
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 from .dag_models import (
@@ -15,17 +13,23 @@ from .dag_models import (
     DAGAnalyzeResponse,
     AnalysisPathInfo, CausalAnalysisResponse,
 )
+from .llm_provider import (
+    LLMProvider,
+    build_async_client,
+    env_key_for,
+    resolve_model,
+)
 
 load_dotenv()
 
 
-def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+def _get_client(provider: LLMProvider, api_key: Optional[str] = None):
     """Build a per-request OpenAI client. Endpoints in main.py reject requests
     that don't supply an API key (`_require_api_key`) before reaching this function."""
-    effective = api_key or os.getenv("OPENAI_API_KEY")
+    effective = api_key or env_key_for(provider)
     if not effective:
-        raise RuntimeError("OpenAI API key not provided.")
-    return AsyncOpenAI(api_key=effective)
+        raise RuntimeError("LLM API key not provided.")
+    return build_async_client(provider, effective)
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +457,11 @@ Provide educational, Socratic-style feedback suitable for a university student w
 
 
 async def analyze_dag_with_gpt(
-    graph: DAGGraph, research_question: Optional[str], api_key: Optional[str] = None
+    graph: DAGGraph,
+    research_question: Optional[str],
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> DAGAnalyzeResponse:
     labels = _node_label_map(graph)
     nodes_desc = [f"{n.id} ({n.label})" for n in graph.nodes]
@@ -475,8 +483,8 @@ Edges: {', '.join(edges_desc)}
         }
     ]
 
-    completion = await _get_client(api_key).chat.completions.create(
-        model="gpt-4o",
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o"),
         messages=[
             {"role": "system", "content": DAG_ANALYSIS_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -508,7 +516,13 @@ Instructions:
 7. Use simple, accessible language. Avoid heavy notation unless the student asks for it."""
 
 
-async def chat_about_dag(graph: DAGGraph, messages: List[dict], api_key: Optional[str] = None):
+async def chat_about_dag(
+    graph: DAGGraph,
+    messages: List[dict],
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+):
     labels = _node_label_map(graph)
     nodes_desc = ", ".join([n.label for n in graph.nodes])
     edges_desc = ", ".join(
@@ -523,8 +537,8 @@ async def chat_about_dag(graph: DAGGraph, messages: List[dict], api_key: Optiona
         if m["role"] in ["user", "assistant"]:
             formatted_messages.append({"role": m["role"], "content": m["content"]})
 
-    completion = await _get_client(api_key).chat.completions.create(
-        model="gpt-4o",
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o"),
         messages=formatted_messages,
         stream=True,
     )

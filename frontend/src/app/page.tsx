@@ -11,7 +11,7 @@ import {
   BrainCircuit, PanelLeftClose, PanelLeftOpen, Bug, Lightbulb, Mail, ExternalLink, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useStoredKey } from "@/lib/apiKey";
+import { useStoredLlmState } from "@/lib/apiKey";
 import { API_KEY_MODAL_EVENT } from "@/lib/apiErrors";
 
 // ── Sidebar nav button (handles both expanded and collapsed states) ──────
@@ -174,7 +174,7 @@ export default function Home() {
   const [activeMode, setActiveMode] = useState<"home" | "lab" | "curriculum" | "playground" | "sandbox">("home");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const storedKey = useStoredKey();
+  const llmState = useStoredLlmState();
 
   // Sidebar collapse/expand state — persists across reloads.
   // Defaults to `true` on both SSR and the first client render (matching markup
@@ -309,7 +309,7 @@ export default function Home() {
           />
           <SidebarNavButton
             icon={KeyRound}
-            label="OpenAI API Key"
+            label="AI Settings"
             active={apiKeyOpen}
             onClick={() => {
               setApiKeyOpen((v) => !v);
@@ -318,7 +318,7 @@ export default function Home() {
             accent="text-indigo-400"
             expanded={effectivelyExpanded}
             disabled={navLocked}
-            dot={storedKey ? 'bg-emerald-400' : 'bg-slate-500'}
+            dot={llmState.key ? 'bg-emerald-400' : 'bg-slate-500'}
           />
           {reportOpen && !navLocked && <ReportIssuePopover onClose={() => setReportOpen(false)} />}
         </div>

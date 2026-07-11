@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Auth-error utilities. The backend returns HTTP 401 from any OpenAI-using endpoint
+ * Auth-error utilities. The backend returns HTTP 401 from any LLM-using endpoint
  * when the user hasn't supplied an API key (or supplied an invalid one). These helpers
  * detect that, dispatch a window event so the API key modal opens automatically, and
  * surface a friendly message that calling components can show to the user.
@@ -10,7 +10,7 @@
 export const API_KEY_MODAL_EVENT = "open-api-key-modal";
 
 const FALLBACK_AUTH_MESSAGE =
-  "OpenAI API key is missing or invalid. Open the key icon at the bottom of the sidebar to set or update your key.";
+  "API key is missing or invalid for the selected provider. Open the key icon at the bottom of the sidebar to set or update your key.";
 
 export function openApiKeyModal(): void {
   if (typeof window === "undefined") return;

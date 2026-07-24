@@ -1,16 +1,19 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ComponentType, type SVGProps } from "react";
 import dynamic from "next/dynamic";
 import ResearchLab from "@/components/ResearchLab";
 import CurriculumDashboard from "@/components/CurriculumDashboard";
 import ApiKeySettings from "@/components/ApiKeySettings";
 import TutorChatPanel, { type TutorFeature } from "@/components/TutorChatPanel";
 import WelcomeHome from "@/components/WelcomeHome";
+import SCMIcon from "@/components/assets/SCMicon";
 import {
   Home as HomeIcon, BookOpen, FlaskConical, Share2, Database, KeyRound, MessageSquare,
   BrainCircuit, PanelLeftClose, PanelLeftOpen, Bug, Lightbulb, Mail, ExternalLink, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+type AppIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 import { useStoredKey } from "@/lib/apiKey";
 import { API_KEY_MODAL_EVENT } from "@/lib/apiErrors";
 
@@ -18,7 +21,7 @@ import { API_KEY_MODAL_EVENT } from "@/lib/apiErrors";
 function SidebarNavButton({
   icon: Icon, label, active, onClick, accent, expanded, dot, disabled = false,
 }: {
-  icon: LucideIcon;
+  icon: LucideIcon | AppIcon;
   label: string;
   active: boolean;
   onClick: () => void;
@@ -169,9 +172,10 @@ function ReportIssuePopover({ onClose }: { onClose: () => void }) {
 
 const DAGPlayground = dynamic(() => import("@/components/DAGPlayground"), { ssr: false });
 const DatasetSandbox = dynamic(() => import("@/components/DatasetSandbox"), { ssr: false });
+const SCMPlayground = dynamic(() => import("@/components/scm/SCMPlayground"), { ssr: false });
 
 export default function Home() {
-  const [activeMode, setActiveMode] = useState<"home" | "lab" | "curriculum" | "playground" | "sandbox">("home");
+  const [activeMode, setActiveMode] = useState<"home" | "lab" | "curriculum" | "playground" | "sandbox" | "scm">("home");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const storedKey = useStoredKey();
@@ -203,13 +207,13 @@ export default function Home() {
   // True while the user is mid-exam in Curriculum — hides FAB and force-closes the panel.
   const [chatLocked, setChatLocked] = useState(false);
 
-  // Reset context to "general" when switching to Home, Lab, or Sandbox (which don't publish)
+  // Reset context to "general" when switching to Home, Lab, Sandbox (which don't publish)
   useEffect(() => {
-    if (activeMode === "home" || activeMode === "lab" || activeMode === "sandbox") {
-      setFeatureContext({ feature: "general", payload: undefined });
-    }
-    // For curriculum/playground, the child component publishes via onContextChange.
-  }, [activeMode]);
+  if (activeMode === "home" || activeMode === "lab" || activeMode === "sandbox") {
+    setFeatureContext({ feature: "general", payload: undefined });
+  }
+  // For curriculum/playground/scm, the child component publishes via onContextChange.
+}, [activeMode]);
 
   // Force-close the chat whenever it's locked (e.g., during an exam).
   useEffect(() => {
@@ -289,6 +293,7 @@ export default function Home() {
           <SidebarNavButton icon={HomeIcon} label="Home" active={activeMode === 'home'} onClick={() => setActiveMode('home')} accent="text-white" expanded={effectivelyExpanded} disabled={navLocked} />
           <SidebarNavButton icon={BookOpen} label="Curriculum" active={activeMode === 'curriculum'} onClick={() => setActiveMode('curriculum')} accent="text-emerald-400" expanded={effectivelyExpanded} disabled={navLocked} />
           <SidebarNavButton icon={Share2} label="DAG Playground" active={activeMode === 'playground'} onClick={() => setActiveMode('playground')} accent="text-amber-400" expanded={effectivelyExpanded} disabled={navLocked} />
+          <SidebarNavButton icon={SCMIcon} label="SCM Playground" active={activeMode === 'scm'} onClick={() => setActiveMode('scm')} accent="text-violet-400" expanded={effectivelyExpanded} disabled={navLocked} />
           <SidebarNavButton icon={Database} label="Dataset Sandbox" active={activeMode === 'sandbox'} onClick={() => setActiveMode('sandbox')} accent="text-cyan-400" expanded={effectivelyExpanded} disabled={navLocked} />
           <SidebarNavButton icon={FlaskConical} label="Research Lab" active={activeMode === 'lab'} onClick={() => setActiveMode('lab')} accent="text-indigo-400" expanded={effectivelyExpanded} disabled={navLocked} />
         </div>
@@ -341,6 +346,8 @@ export default function Home() {
               />
           ) : activeMode === "playground" ? (
               <DAGPlayground onContextChange={handleContextChange} />
+          ) : activeMode === "scm" ? (
+              <SCMPlayground onContextChange={handleContextChange} />
           ) : (
               <DatasetSandbox />
           )}

@@ -1,12 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Dict, Optional, Union
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, AuthenticationError as OpenAIAuthError
-
+import numpy as np
 from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest, ResearchProject, ExamResponse
 from .services import analyze_paper, extract_text_from_pdf, extract_csv_schema, chat_with_paper, generate_exam_questions
 from .curriculum_data import CURRICULUM_METHODS
@@ -22,12 +22,15 @@ from .dag_services import validate_dag, check_d_separation, find_all_paths, anal
 from .sandbox_models import (
     QueriesResponse, DatasetPreview,
     EstimateRequest, EstimateResponse,
-    InterpretRequest,
+    InterpretRequest, 
 )
 from .sandbox_services import (
     load_queries, preview_dataset, estimate as sandbox_estimate,
     interpret_result,
 )
+
+from app.scm_model import HardIntervention, SCMSchema, SoftIntervention, TraceLine
+from app.scm_evaluator import abduce_noise, apply_intervention, build_computation_trace, chat_about_scm, compute_counterfactual, compute_kde, compute_treatment_response, evaluate_scm, compute_stats, compute_histogram
 
 load_dotenv()
 
@@ -410,6 +413,208 @@ async def sandbox_interpret(
     api_key = _require_api_key(x_openai_key)
     try:
         stream = await interpret_result(request, api_key=api_key)
+    except OpenAIAuthError:
+        _raise_auth_failure()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    async def generate():
+        async for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# --- SCM endpoints ---
+
+class SCMSampleRequest(BaseModel):
+    scm_schema: SCMSchema
+    n_samples: int = 1000
+    seed: Optional[int] = None
+    intervention: Optional[Union[HardIntervention, SoftIntervention]] = None
+
+
+class SCMVariableResult(BaseModel):
+    id: str
+    equation_display: str
+    stats: dict
+    histogram: dict
+    kde: dict
+    raw_samples: list[float]
+
+
+class SCMSampleResponse(BaseModel):
+    results: dict[str, SCMVariableResult]
+    # for overlayed histogram
+    intervened_results: Optional[dict[str, SCMVariableResult]] = None
+
+
+@app.post("/scm/sample", response_model=SCMSampleResponse)
+def sample_scm(payload: SCMSampleRequest):
+    effective_seed = payload.seed if payload.seed is not None else int(np.random.randint(0, 2**31 - 1))
+
+    try:
+        samples = evaluate_scm(payload.scm_schema, payload.n_samples, effective_seed)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    def build_results(schema, samples):
+        return {
+            var_id: SCMVariableResult(
+                id=var_id,
+                equation_display=schema.equation_display(var_id),
+                stats=compute_stats(data),
+                histogram=compute_histogram(data),
+                kde=compute_kde(data),
+                raw_samples=data.tolist(),
+            )
+            for var_id, data in samples.items()
+        }
+
+    results = build_results(payload.scm_schema, samples)
+
+    intervened_results = None
+    if payload.intervention:
+        try:
+            intervened_schema = apply_intervention(payload.scm_schema, payload.intervention)
+            intervened_samples = evaluate_scm(intervened_schema, payload.n_samples, effective_seed)
+            intervened_results = build_results(intervened_schema, intervened_samples)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    return SCMSampleResponse(results=results, intervened_results=intervened_results)
+
+class AbductionRequest(BaseModel):
+    scm_schema: SCMSchema
+    observed_values: Dict[str, float]
+
+class AbductionResponse(BaseModel):
+    observed_values: Dict[str, float]
+    abduced_noise: Dict[str, float]
+    warnings: list[str] = []
+
+
+@app.post("/scm/abduct", response_model=AbductionResponse)
+def abduct_scm(payload: AbductionRequest):
+    try:
+        noise, warnings = abduce_noise(payload.scm_schema, payload.observed_values)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return AbductionResponse(observed_values=payload.observed_values, abduced_noise=noise, warnings=warnings)
+
+class CounterfactualRequest(BaseModel):
+    scm_schema: SCMSchema
+    abduced_noise: Dict[str, float]
+    intervene_id: str
+    intervene_value: float
+
+
+class CounterfactualResponse(BaseModel):
+    counterfactual_values: Dict[str, float]
+
+
+@app.post("/scm/counterfactual", response_model=CounterfactualResponse)
+def counterfactual_scm(payload: CounterfactualRequest):
+    try:
+        values = compute_counterfactual(
+            payload.scm_schema,
+            payload.abduced_noise,
+            payload.intervene_id,
+            payload.intervene_value,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return CounterfactualResponse(counterfactual_values=values)
+
+class TreatmentResponseRequest(BaseModel):
+    scm_schema: SCMSchema
+    abduced_noise: Dict[str, float]
+    intervene_id: str
+    query_id: str
+    value_range: List[float]
+
+
+class TreatmentResponseResponse(BaseModel):
+    points: List[Dict[str, float]]
+
+
+@app.post("/scm/treatment-response", response_model=TreatmentResponseResponse)
+def treatment_response(payload: TreatmentResponseRequest):
+    try:
+        points = compute_treatment_response(
+            payload.scm_schema, payload.abduced_noise, payload.intervene_id, payload.query_id, payload.value_range
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return TreatmentResponseResponse(points=points)
+
+
+class ComputationTraceRequest(BaseModel):
+    scm_schema: SCMSchema
+    observed_values: Dict[str, float]
+    abduced_noise: Dict[str, float]
+    intervene_id: str
+    intervene_value: float
+
+
+class ComputationTraceResponse(BaseModel):
+    structural_equations: List[str]
+    abduction: List[TraceLine]
+    action: Dict[str, float | str]
+    prediction: List[TraceLine]
+    final_values: Dict[str, float]
+
+
+@app.post("/scm/computation-trace", response_model=ComputationTraceResponse)
+def computation_trace(payload: ComputationTraceRequest):
+    try:
+        trace = build_computation_trace(
+            payload.scm_schema,
+            payload.observed_values,
+            payload.abduced_noise,
+            payload.intervene_id,
+            payload.intervene_value,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ComputationTraceResponse(**trace)
+
+
+class SCMChatRequest(BaseModel):
+    scm_schema: SCMSchema
+    message: str
+    history: List[Dict[str, str]] = []
+    active_tab: Optional[str] = None
+    observational: Optional[dict] = None
+    intervention: Optional[dict] = None
+    counterfactual: Optional[dict] = None
+    sandbox: Optional[dict] = None
+
+
+# ----- NOT TESTED -----
+@app.post("/scm/chat")
+async def scm_chat(request: SCMChatRequest, x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key")):
+    api_key = _require_api_key(x_openai_key)
+
+    try:
+        stream = await chat_about_scm(
+            # collect contexts
+            request.scm_schema,
+            request.history + [{"role": "user", "content": request.message}],
+            api_key=api_key,
+            active_tab=request.active_tab,
+            intervention=request.intervention,
+            observational=request.observational,
+            counterfactual=request.counterfactual,
+            sandbox=request.sandbox,
+        )
+
     except OpenAIAuthError:
         _raise_auth_failure()
     except HTTPException:

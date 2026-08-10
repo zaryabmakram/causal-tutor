@@ -22,7 +22,7 @@ import { apiUrl } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-export type TutorFeature = "dag" | "curriculum" | "general";
+export type TutorFeature = "dag" | "curriculum" | "general" | "scm";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -60,6 +60,7 @@ const FEATURE_META: Record<TutorFeature, { label: string; chipBg: string; chipTe
   dag: { label: "DAG chat", chipBg: "bg-amber-100", chipText: "text-amber-700" },
   curriculum: { label: "Curriculum chat", chipBg: "bg-emerald-100", chipText: "text-emerald-700" },
   general: { label: "General chat", chipBg: "bg-slate-100", chipText: "text-slate-600" },
+  scm: { label: "SCM chat", chipBg: "bg-violet-100", chipText: "text-violet-700" },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -101,6 +102,30 @@ function buildRequest(
     return {
       url: apiUrl("/dag/chat"),
       body: JSON.stringify({ message, history: historyPayload, graph }),
+    };
+  }
+
+  if (feature === "scm") {
+    const {
+      schema,
+      activeTab = null,
+      intervention = null,
+      observational = null,
+      counterfactual = null,
+      sandbox = null,
+    } = featureContext || {};
+    return {
+      url: apiUrl("/scm/chat"),
+      body: JSON.stringify({
+        scm_schema: schema,
+        message,
+        history: historyPayload,
+        active_tab: activeTab,
+        intervention,
+        observational,
+        counterfactual,
+        sandbox,
+      }),
     };
   }
 
@@ -437,6 +462,8 @@ export default function TutorChatPanel(props: TutorChatPanelProps) {
                   ? "I have context on the DAG you're building."
                   : feature === "curriculum"
                   ? "I have context on the curriculum method you're viewing."
+                  : feature == "scm"
+                  ? "I have context on the SCM you're viewing."
                   : "I'm a general causal inference tutor."}
               </p>
             </div>

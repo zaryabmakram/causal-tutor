@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, ChevronDown, RotateCcw, Share2, X, Plus} from "lucide-react";
 import SCMIcon from "@/components/assets/SCMicon";
 import SCMOverview from "@/components/scm/SCMOverview";
@@ -9,7 +9,7 @@ import { Hoverable } from "@/components/scm/widgets/Hoverable";
 import { edgesFromSchema } from "@/types";
 import type { Intervention, SCMSchema, SCMVariable } from "@/types";
 import SCMInterventionalTab from "@/components/scm/SCMInterventional";
-import SCMCounterfactualTab from "@/components/scm/SCMCounterfactual";
+import SCMCounterfactualTab, { type CounterfactualSession } from "@/components/scm/SCMCounterfactual";
 import SCMSandbox from "./SCMSandbox";
 import { SCM_EXAMPLES, type SCMExampleMeta } from "@/data/example-scms";
 
@@ -36,7 +36,7 @@ function SCMBasicsPanel({
     },
     {
       title: "Why noise terms?",
-      body: "Noise represents everything unmeasured that affects a variable. Every variable has its own independent noise drawn from a distribution that you get to choose.",
+      body: "Noise represents everything unmeasured that affects a variable. Every variable has an independent noise drawn from a distribution that you get to choose. These noises are assumed to be independent of each other.",
     },
     { 
       title: "Observational vs. Interventional",
@@ -53,7 +53,7 @@ function SCMBasicsPanel({
     "Set each variable's noise distribution.",
     "Explore observational data and distributions.",
     "Run an intervention to see population-level effects.",
-    "Build a counterfactual query for a specific observation, and explore its .",
+    "Build a counterfactual query for a specific observation, and explore its implications.",
   ];
 
   return (
@@ -134,6 +134,18 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
   const [schema, setSchema] = useState<SCMSchema | null>(null);
   const [defaultSchema, setDefaultSchema] = useState<SCMSchema | null>(null);
   const [exampleDropdownOpen, setExampleDropdownOpen] = useState(false);
+  const exampleDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!exampleDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exampleDropdownRef.current && !exampleDropdownRef.current.contains(e.target as Node)) {
+        setExampleDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [exampleDropdownOpen]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [hasIntervention, setHasIntervention] = useState(false);
   const [intervention, setIntervention] = useState<Intervention | null>(null);
@@ -152,6 +164,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
   const [obsContext, setObsContext] = useState<any>(null);
   const [cfContext, setCfContext] = useState<any>(null);
   const [sandboxContext, setSandboxContext] = useState<any>(null);
+  const [cfSession, setCfSession] = useState<CounterfactualSession | null>(null);
 
   useEffect(() => {
     if (!schema || !onContextChange) return;
@@ -182,9 +195,12 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
     setSchema(example.schema);
     setDefaultSchema(example.schema);
     clearIntervention();
+    setCfSession(null);
     setResetToken((t) => t + 1);
     setExampleDropdownOpen(false);
-    setActiveTab("Overview");
+    setActiveTab((current) =>
+      current === "Observational" || current === "Counterfactual" ? current : "Overview"
+    );
   };
 
   const dismissBasics = () => {
@@ -219,6 +235,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
   const addVariable = (newVar: SCMVariable) => {
     setSchema((prev) => (prev ? { ...prev, variables: [...prev.variables, newVar] } : prev));
     clearIntervention();
+    setCfSession(null);
   };
 
   const deleteVariable = (varId: string) => {
@@ -237,12 +254,14 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
           })),
       };
     });
+    setCfSession(null);
   };
 
   const resetSchema = () => {
     if (!defaultSchema) return;
     setSchema(defaultSchema);
     clearIntervention();
+    setCfSession(null);
     setResetToken((t) => t + 1);
   };
 
@@ -280,7 +299,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
           </button>
 
           {/* examples + dropdown */}
-          <div className="relative flex-shrink-0">
+          <div ref={exampleDropdownRef} className="relative flex-shrink-0">
             <button
               onClick={() => setExampleDropdownOpen((o) => !o)}
               className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
@@ -380,14 +399,26 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
                 tabButton
               );
             })}
+
+            {activeTab === "Sandbox" && (
+              <button
+                key="Sandbox"
+                className="relative h-full text-sm font-bold text-emerald-700"
+              >
+                Sandbox
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-emerald-600" />
+              </button>
+            )}
           </nav>
 
-         <button
+         {activeTab !== "Sandbox" && (
+          <button
             onClick={() => setActiveTab("Sandbox")}
             className="rounded-md border border-emerald-500/80 bg-emerald-50 px-4 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100/70"
           >
             Sandbox
           </button>
+         )}
         </div>
 
         <div
@@ -404,6 +435,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
               <SCMSandbox
                 onCreateSchema={(newSchema) => {
                   setSchema(newSchema);
+                  setDefaultSchema(newSchema);
                   setActiveTab("Observational");
                 }}
                 onContextChange={setSandboxContext}
@@ -432,7 +464,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
                 </div>
               </div>
             ) : activeTab === "Overview" ? (
-              <SCMOverview variables={variables} edges={edges} />
+                  <SCMOverview key={`${schema.id}-${resetToken}`} variables={variables} edges={edges} />
             ) : activeTab === "Observational" ? (
                   <SCMObservationalTab
                     key={`${schema.id}-${resetToken}`}
@@ -445,7 +477,13 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
               ) : activeTab === "Interventional" ? (
                       <SCMInterventionalTab key={`${schema.id}-${resetToken}`} schema={schema} intervention={intervention} />
             ) : activeTab === "Counterfactual" ? (
-                      <SCMCounterfactualTab key={`${schema.id}-${resetToken}`} schema={schema} onContextChange={setCfContext} />
+                      <SCMCounterfactualTab
+                        key={`${schema.id}-${resetToken}`}
+                        schema={schema}
+                        session={cfSession}
+                        onSessionChange={setCfSession}
+                        onContextChange={setCfContext}
+                      />
             ) : null}
           </div>
 

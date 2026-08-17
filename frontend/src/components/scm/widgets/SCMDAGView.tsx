@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -8,6 +8,9 @@ import {
   Controls,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  useNodes,
+  useEdges,
   MarkerType,
   Position,
   Handle,
@@ -84,6 +87,29 @@ function NoiseNode({ data }: NodeProps) {
 }
 
 const nodeTypes = { varNode: VarNode, noiseNode: NoiseNode };
+
+// re-fits the view whenever the DAG container resizes (e.g. resizable panels)
+// or the graph grows (e.g. toggling noise nodes), otherwise the graph gets clipped
+function AutoFitOnResize() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { fitView } = useReactFlow();
+  const nodeCount = useNodes().length;
+  const edgeCount = useEdges().length;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => fitView({ duration: 0 }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitView]);
+
+  useEffect(() => {
+    fitView({ duration: 200 });
+  }, [nodeCount, edgeCount, fitView]);
+
+  return <div ref={ref} className="pointer-events-none absolute inset-0" />;
+}
 
 function computeLevels(variables: SCMVariable[]): Record<string, number> {
   const level: Record<string, number> = {};
@@ -278,6 +304,7 @@ export default function SCMDAGView({ variables, showToggle = true, intervention,
         zoomOnScroll
         proOptions={{ hideAttribution: true }}
       >
+        <AutoFitOnResize />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#e2e8f0" />
         <Controls showInteractive={false} className="!rounded-lg !border-slate-200 !shadow-md" />
       </ReactFlow>

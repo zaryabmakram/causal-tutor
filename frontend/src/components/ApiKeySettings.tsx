@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, Eye, EyeOff, KeyRound, Loader2, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Check, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Search, X } from "lucide-react";
 import axios from "axios";
 import {
   type LLMProvider,
@@ -12,6 +12,7 @@ import {
   saveKey,
   saveModel,
   saveProvider,
+  useStoredLlmState,
 } from "@/lib/apiKey";
 import { apiUrl } from "@/lib/api";
 
@@ -47,6 +48,8 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [provider, setProvider] = useState<LLMProvider>("openai");
   const [model, setModel] = useState("");
+  const [modelProvider, setModelProvider] = useState<LLMProvider>("openai");
+  const [modelSearch, setModelSearch] = useState("");
   const [input, setInput] = useState("");
   const [reveal, setReveal] = useState(false);
   const [savedToast, setSavedToast] = useState<string | null>(null);
@@ -54,6 +57,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
   const [validating, setValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const llmState = useStoredLlmState();
 
   const activeProviderConfig = useMemo(
     () => providers.find((p) => p.id === provider) || null,
@@ -61,6 +65,51 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
   );
 
   const activeStoredKey = getStoredKey(provider);
+  const currentProviderConfig = useMemo(
+    () => providers.find((p) => p.id === llmState.provider) || null,
+    [providers, llmState.provider]
+  );
+  const savedModelId = llmState.model;
+  const currentModelId = savedModelId || currentProviderConfig?.default_model || currentProviderConfig?.models?.[0]?.id || "";
+  const currentModelOption = currentProviderConfig?.models?.find((m) => m.id === currentModelId);
+  const selectedDraftModel = modelProvider === provider ? model : "";
+  const selectedModelOption = selectedDraftModel
+    ? activeProviderConfig?.models?.find((m) => m.id === selectedDraftModel)
+    : undefined;
+  const draftProviderLabel = activeProviderConfig?.label || (provider === "openrouter" ? "OpenRouter" : "OpenAI");
+  const currentProviderLabel = currentProviderConfig?.label || (llmState.provider === "openrouter" ? "OpenRouter" : "OpenAI");
+  const hasUnsavedProviderChange = provider !== llmState.provider;
+  const draftModelBaseline = provider === llmState.provider ? currentModelId : getStoredModel(provider) || "";
+  const hasUnsavedModelChange = !!selectedDraftModel && selectedDraftModel !== draftModelBaseline;
+  const hasUnsavedSelection = hasUnsavedProviderChange || hasUnsavedModelChange;
+
+  const filteredModelGroups = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase();
+    const groups = new Map<string, ModelOption[]>();
+    (activeProviderConfig?.models || [])
+      .filter((m) => !query || m.label.toLowerCase().includes(query) || m.id.toLowerCase().includes(query))
+      .forEach((m) => {
+        const rawGroup = provider === "openrouter" && m.id.includes("/") ? m.id.split("/")[0] : "openai";
+        const group =
+          rawGroup === "openai"
+            ? "OpenAI"
+            : rawGroup === "anthropic"
+            ? "Anthropic"
+            : rawGroup === "google"
+            ? "Google"
+            : rawGroup === "x-ai"
+            ? "xAI"
+            : rawGroup === "deepseek"
+            ? "DeepSeek"
+            : rawGroup === "z-ai"
+            ? "Z.ai"
+            : rawGroup === "moonshotai"
+            ? "Moonshot AI"
+            : rawGroup;
+        groups.set(group, [...(groups.get(group) || []), m]);
+      });
+    return Array.from(groups.entries());
+  }, [activeProviderConfig, modelSearch, provider]);
 
   const syncInputsForProvider = (nextProvider: LLMProvider, availableProviders: ProviderConfig[]) => {
     const cfg = availableProviders.find((p) => p.id === nextProvider);
@@ -75,6 +124,8 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
     setProvider(nextProvider);
     setInput(savedKey || cfg?.env_api_key || "");
     setModel(fallbackModel);
+    setModelProvider(nextProvider);
+    setModelSearch("");
   };
 
   useEffect(() => {
@@ -116,8 +167,12 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
   }, [isOpen, onClose]);
 
   const handleProviderChange = (nextProvider: LLMProvider) => {
-    saveProvider(nextProvider);
-    syncInputsForProvider(nextProvider, providers);
+    const cfg = providers.find((p) => p.id === nextProvider);
+    const savedKey = getStoredKey(nextProvider);
+
+    setProvider(nextProvider);
+    setInput(savedKey || cfg?.env_api_key || "");
+    setModelSearch("");
   };
 
   const handleSave = async () => {
@@ -126,7 +181,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
       setValidationError("Key cannot be empty.");
       return;
     }
-    if (!model.trim()) {
+    if (!selectedDraftModel.trim()) {
       setValidationError("Select a model.");
       return;
     }
@@ -143,7 +198,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
         return;
       }
       saveProvider(provider);
-      saveModel(provider, model);
+      saveModel(provider, selectedDraftModel);
       saveKey(provider, trimmed);
       setSavedToast(`${activeProviderConfig?.label || "Provider"} settings saved.`);
       setTimeout(() => setSavedToast(null), 2500);
@@ -168,7 +223,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
   return (
     <div
       ref={popoverRef}
-      className="absolute left-full ml-2 bottom-4 w-[360px] bg-white border border-slate-200 rounded-2xl shadow-2xl z-[60] p-4 animate-in fade-in slide-in-from-left-2 duration-200"
+      className="absolute left-full ml-2 bottom-4 w-[410px] bg-white border border-slate-200 rounded-2xl shadow-2xl z-[60] p-4 animate-in fade-in slide-in-from-left-2 duration-200"
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -176,8 +231,8 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
             <KeyRound size={16} />
           </div>
           <div>
-            <div className="font-bold text-sm text-slate-900">AI Provider Settings</div>
-            <div className="text-[11px] text-slate-500">Provider, model, and API key</div>
+            <div className="font-bold text-sm text-slate-900">Connect your AI</div>
+            <div className="text-[11px] text-slate-500">Choose provider, model, and credentials</div>
           </div>
         </div>
         <button
@@ -225,20 +280,98 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
         </div>
       </div>
 
+      <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-500">Current model in use</div>
+            <div className="mt-1 text-sm font-bold text-slate-900">
+              {currentProviderLabel} · {currentModelOption?.label || currentModelId || "No model selected"}
+            </div>
+            {currentModelId && <div className="mt-0.5 font-mono text-[10px] text-slate-500">{currentModelId}</div>}
+          </div>
+          {hasUnsavedSelection ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+              Unsaved
+            </span>
+          ) : (
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+              Active
+            </span>
+          )}
+        </div>
+        {hasUnsavedSelection && (
+          <div className="mt-2 rounded-lg border border-amber-100 bg-white/70 px-2 py-1.5 text-[11px] text-amber-800">
+            {selectedDraftModel ? (
+              <>
+                Selected next: <span className="font-semibold">{draftProviderLabel} · {selectedModelOption?.label || selectedDraftModel}</span>. Save to make it active.
+              </>
+            ) : (
+              <>
+                Choose a model for <span className="font-semibold">{draftProviderLabel}</span>, then save to make it active.
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mb-3">
-        <div className="text-[11px] font-semibold text-slate-500 mb-1">Model</div>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          disabled={loading || validating || !activeProviderConfig}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50 disabled:bg-slate-50 disabled:text-slate-400"
-        >
-          {(activeProviderConfig?.models || []).map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-[11px] font-semibold text-slate-500">Choose model</div>
+          <div className="text-[10px] text-slate-400">{activeProviderConfig?.models?.length || 0} available</div>
+        </div>
+        <div className="relative mb-2">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={modelSearch}
+            onChange={(e) => setModelSearch(e.target.value)}
+            placeholder="Search by name or model id..."
+            disabled={loading || validating || !activeProviderConfig}
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50 disabled:bg-slate-50 disabled:text-slate-400"
+          />
+        </div>
+        <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2 custom-scrollbar">
+          {filteredModelGroups.length === 0 ? (
+            <div className="py-6 text-center text-xs text-slate-400">No models match your search.</div>
+          ) : (
+            filteredModelGroups.map(([group, options]) => (
+              <div key={group} className="mb-2 last:mb-0">
+                <div className="px-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{group}</div>
+                <div className="space-y-1">
+                  {options.map((m) => {
+                    const selected = modelProvider === provider && m.id === model;
+                    const inUse = provider === llmState.provider && m.id === currentModelId;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setModel(m.id);
+                          setModelProvider(provider);
+                        }}
+                        disabled={loading || validating}
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? "border-indigo-300 bg-white ring-2 ring-indigo-50"
+                            : "border-transparent bg-white/70 hover:border-slate-200 hover:bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-slate-800">{m.label}</span>
+                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                            inUse ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : selected ? "bg-indigo-50 text-indigo-700 border border-indigo-100" : "bg-slate-100 text-slate-500"
+                          }`}>
+                            {inUse ? "In use" : selected ? "Selected" : "Pick"}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-[10px] text-slate-400">{m.id}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="relative mb-3">
@@ -270,7 +403,7 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
       <div className="flex items-center gap-2">
         <button
           onClick={handleSave}
-          disabled={loading || validating || !input.trim() || !model}
+          disabled={loading || validating || !input.trim() || !selectedDraftModel}
           className="flex-1 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
         >
           {validating ? (

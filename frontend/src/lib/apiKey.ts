@@ -10,6 +10,7 @@ const MODEL_STORAGE_PREFIX = "llm_model_";
 const API_KEY_STORAGE_PREFIX = "llm_api_key_";
 
 const DEFAULT_PROVIDER: LLMProvider = "openai";
+const ALL_PROVIDERS: readonly LLMProvider[] = ["openai", "openrouter"];
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -147,6 +148,49 @@ export function getApiHeaders(): Record<string, string> {
   }
 
   return headers;
+}
+
+/** True when at least one provider has a stored (already-validated) API key. */
+export function hasAnyStoredKey(): boolean {
+  if (!isBrowser()) return false;
+  return ALL_PROVIDERS.some((p) => {
+    const key = getStoredKey(p);
+    return !!key && key.trim().length > 0;
+  });
+}
+
+/**
+ * React hook that reports whether any provider has valid stored credentials.
+ *
+ * Initializes to `false` so SSR and the first client render agree (React does
+ * not patch className mismatches during hydration). A mount effect then reads
+ * localStorage and re-renders, so the indicator turns green on launch once
+ * populated. It also refreshes on any `llm_*` storage change (save/reset).
+ */
+export function useHasStoredCredentials(): boolean {
+  const [hasCredentials, setHasCredentials] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => setHasCredentials(hasAnyStoredKey());
+    refresh(); // sync from localStorage after hydration (first launch)
+
+    const onStorage = (e: StorageEvent) => {
+      const key = e.key;
+      if (
+        key === null ||
+        key === PROVIDER_STORAGE_KEY ||
+        key === LEGACY_OPENAI_STORAGE_KEY ||
+        key.startsWith(API_KEY_STORAGE_PREFIX) ||
+        key.startsWith(MODEL_STORAGE_PREFIX)
+      ) {
+        refresh();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  return hasCredentials;
 }
 
 /** React hook for the active provider + its key + selected model. */

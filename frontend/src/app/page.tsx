@@ -11,7 +11,7 @@ import {
   BrainCircuit, PanelLeftClose, PanelLeftOpen, Bug, Lightbulb, Mail, ExternalLink, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useStoredLlmState } from "@/lib/apiKey";
+import { useHasStoredCredentials } from "@/lib/apiKey";
 import { API_KEY_MODAL_EVENT } from "@/lib/apiErrors";
 
 // ── Sidebar nav button (handles both expanded and collapsed states) ──────
@@ -174,7 +174,7 @@ export default function Home() {
   const [activeMode, setActiveMode] = useState<"home" | "lab" | "curriculum" | "playground" | "sandbox">("home");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const llmState = useStoredLlmState();
+  const hasValidCredentials = useHasStoredCredentials();
 
   // Sidebar collapse/expand state — persists across reloads.
   // Defaults to `true` on both SSR and the first client render (matching markup
@@ -318,7 +318,7 @@ export default function Home() {
             accent="text-indigo-400"
             expanded={effectivelyExpanded}
             disabled={navLocked}
-            dot={llmState.key ? 'bg-emerald-400' : 'bg-slate-500'}
+            dot={hasValidCredentials ? 'bg-emerald-400' : 'bg-slate-500'}
           />
           {reportOpen && !navLocked && <ReportIssuePopover onClose={() => setReportOpen(false)} />}
         </div>

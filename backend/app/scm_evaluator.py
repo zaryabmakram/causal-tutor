@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 import numpy as np
-from openai import AsyncOpenAI
+from .llm_provider import LLMProvider, build_async_client, resolve_model
 from .scm_model import SCMSchema, SCMVariable, NoiseDistribution, NoiseType, HardIntervention, TraceLine
 from scipy.stats import gaussian_kde
 
@@ -420,7 +420,7 @@ def build_scm_system_prompt(schema: SCMSchema, active_tab: Optional[str] = None,
     return "\n".join(parts)
 
 
-async def chat_about_scm( schema: SCMSchema, history: List[Dict[str, str]], api_key: str, active_tab: Optional[str] = None,
+async def chat_about_scm( schema: SCMSchema, history: List[Dict[str, str]], api_key: str, provider: LLMProvider = "openai", model: Optional[str] = None, active_tab: Optional[str] = None,
         intervention: Optional[dict] = None, observational: Optional[dict] = None, counterfactual: Optional[dict] = None, sandbox: Optional[dict] = None):
     
     system_prompt = build_scm_system_prompt(schema, active_tab, intervention, counterfactual)
@@ -430,9 +430,9 @@ async def chat_about_scm( schema: SCMSchema, history: List[Dict[str, str]], api_
     sb_ctx = format_sandbox_context(sandbox)
     if sb_ctx:
         system_prompt += "\n\n" + sb_ctx
-    client = AsyncOpenAI(api_key=api_key)
+    client = build_async_client(provider, api_key)
     return await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o-mini"),
         messages=[{"role": "system", "content": system_prompt}, *history],
         stream=True,
     )

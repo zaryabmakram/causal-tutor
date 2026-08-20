@@ -50,15 +50,15 @@ Causal Tutor is more than a chatbot. It teaches the *scientific design* of causa
 - **Ground-truth comparison chip** — green if estimate falls inside the 95% CI of the known effect, amber if close, red if far off.
 - **AI interpretation** — streaming GPT paragraph in plain language explaining what the estimate means, how it compares to the truth, and which assumptions are most at risk.
 
-### 🔑 Per-user OpenAI API key
-- Sidebar key icon opens a settings panel where each user saves their own OpenAI API key (stored in browser localStorage).
-- Pre-flight validation against OpenAI before saving (rejects bad keys with an inline error).
-- Backend rejects requests without a key (HTTP 401) and translates OpenAI auth errors into clear, actionable messages.
+### 🔑 Per-user LLM provider settings (OpenAI + OpenRouter)
+- Sidebar key icon opens a settings panel where each user selects provider/model and saves their own provider key (stored in browser localStorage).
+- Pre-flight validation runs against the selected provider before saving (rejects bad keys with an inline error).
+- Backend rejects requests without a key (HTTP 401) and returns provider-specific auth guidance.
 - Auto-opens the settings panel when any AI feature gets a 401, so users always know how to fix it.
 
 ## 🛠️ Tech Stack
 
-- **Backend:** Python · FastAPI · OpenAI (GPT-4o) · NetworkX · statsmodels · linearmodels · scikit-learn · pandas · PyPDF
+- **Backend:** Python · FastAPI · OpenAI-compatible clients (OpenAI + OpenRouter) · NetworkX · statsmodels · linearmodels · scikit-learn · pandas · PyPDF
 - **Frontend:** TypeScript · Next.js 14 · React 18 · Tailwind CSS · React Flow (`@xyflow/react`) · Recharts · Mermaid.js · KaTeX · Lucide
 - **Infrastructure:** Docker Compose
 
@@ -66,7 +66,7 @@ Causal Tutor is more than a chatbot. It teaches the *scientific design* of causa
 
 ### Prerequisites
 - Docker & Docker Compose
-- An OpenAI API key
+- An OpenAI or OpenRouter API key
 
 ### Run with Docker (recommended)
 
@@ -80,9 +80,9 @@ Then open:
 - App: [http://localhost:3000](http://localhost:3000)
 - API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-On first launch, click the **key icon** at the bottom of the left sidebar and paste your OpenAI API key. It's saved only in your browser's localStorage and sent with each AI request.
+On first launch, click the **key icon** at the bottom of the left sidebar, choose your provider and model, then paste your API key. It's saved only in your browser's localStorage and sent with each AI request.
 
-> A `backend/.env` with `OPENAI_API_KEY=sk-...` is supported for local-dev convenience but the user-supplied key always takes precedence.
+> A `backend/.env` with `OPENAI_API_KEY=...` and/or `OPENROUTER_API_KEY=...` is supported for local-dev convenience, but the user-supplied key always takes precedence.
 
 ### Local development (no Docker)
 

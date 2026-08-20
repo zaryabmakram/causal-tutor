@@ -1,36 +1,79 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional, Union
-from pydantic import BaseModel
 import os
-from dotenv import load_dotenv
-from openai import AsyncOpenAI, AuthenticationError as OpenAIAuthError
+from typing import Dict, List, Optional, Union
+
 import numpy as np
-from .models import CausalQueryResponse, ChatRequest, APIAnalysisResponse, AnalyzeTextRequest, ResearchProject, ExamResponse
-from .services import analyze_paper, extract_text_from_pdf, extract_csv_schema, chat_with_paper, generate_exam_questions
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from openai import APIStatusError, AuthenticationError as OpenAIAuthError
+from pydantic import BaseModel
+
 from .curriculum_data import CURRICULUM_METHODS
 from .dag_models import (
-    DAGValidateRequest, DAGValidateResponse,
-    DSeparationRequest, DSeparationResponse,
-    PathsRequest, PathsResponse,
-    DAGAnalyzeRequest, DAGAnalyzeResponse,
+    CausalAnalysisRequest,
+    CausalAnalysisResponse,
+    DAGAnalyzeRequest,
+    DAGAnalyzeResponse,
     DAGChatRequest,
-    CausalAnalysisRequest, CausalAnalysisResponse,
+    DAGEdge,
+    DAGGraph,
+    DAGNode,
+    DAGValidateRequest,
+    DAGValidateResponse,
+    DSeparationRequest,
+    DSeparationResponse,
+    PathsRequest,
+    PathsResponse,
 )
-from .dag_services import validate_dag, check_d_separation, find_all_paths, analyze_dag_with_gpt, chat_about_dag, causal_analysis
+from .dag_services import (
+    analyze_dag_with_gpt,
+    causal_analysis,
+    chat_about_dag,
+    check_d_separation,
+    find_all_paths,
+    validate_dag,
+)
+from .llm_provider import (
+    DEFAULT_PROVIDER,
+    LLMProvider,
+    LLMRequestContext,
+    build_async_client,
+    default_model_for,
+    model_options,
+    normalize_provider,
+    provider_label,
+)
+from .models import APIAnalysisResponse, AnalyzeTextRequest, ExamResponse
 from .sandbox_models import (
-    QueriesResponse, DatasetPreview,
-    EstimateRequest, EstimateResponse,
-    InterpretRequest, 
+    DatasetPreview,
+    EstimateRequest,
+    EstimateResponse,
+    InterpretRequest,
+    QueriesResponse,
 )
-from .sandbox_services import (
-    load_queries, preview_dataset, estimate as sandbox_estimate,
-    interpret_result,
+from .sandbox_services import estimate as sandbox_estimate
+from .sandbox_services import interpret_result, load_queries, preview_dataset
+from .scm_evaluator import (
+    abduce_noise,
+    apply_intervention,
+    build_computation_trace,
+    chat_about_scm,
+    compute_counterfactual,
+    compute_histogram,
+    compute_kde,
+    compute_stats,
+    compute_treatment_response,
+    evaluate_scm,
 )
-
-from app.scm_model import HardIntervention, SCMSchema, SoftIntervention, TraceLine
-from app.scm_evaluator import abduce_noise, apply_intervention, build_computation_trace, chat_about_scm, compute_counterfactual, compute_kde, compute_treatment_response, evaluate_scm, compute_stats, compute_histogram
+from .scm_model import HardIntervention, SCMSchema, SoftIntervention, TraceLine
+from .services import (
+    analyze_paper,
+    chat_with_paper,
+    extract_csv_schema,
+    extract_text_from_pdf,
+    generate_exam_questions,
+)
 
 load_dotenv()
 
@@ -50,215 +93,281 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     # When origins is "*", browsers reject responses that also set
-    # Access-Control-Allow-Credentials: true — so disable credentials in that case.
+    # Access-Control-Allow-Credentials: true - so disable credentials in that case.
     allow_credentials=_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Helpers for OpenAI key auth ───────────────────────────────────────────
 
-_MISSING_KEY_MSG = (
-    "OpenAI API key not set. Open the API key settings (key icon, bottom-left of the sidebar) "
-    "and save your key."
-)
-
-_INVALID_KEY_MSG = (
-    "Invalid OpenAI API key. Open the API key settings (key icon, bottom-left) and update your key."
-)
+def _missing_key_msg(provider: LLMProvider) -> str:
+    return (
+        f"{provider_label(provider)} API key not set. Open the API key settings (key icon, bottom-left of the "
+        "sidebar) and save your key."
+    )
 
 
-def _require_api_key(key: Optional[str]) -> str:
-    """Reject requests that didn't supply an X-OpenAI-Key header. The .env key is a
-    local-development convenience used only to prefill the UI input — production users
-    must explicitly save their key in the UI."""
-    if not key or not key.strip():
-        raise HTTPException(status_code=401, detail=_MISSING_KEY_MSG)
-    return key.strip()
+def _invalid_key_msg(provider: LLMProvider) -> str:
+    return (
+        f"Invalid {provider_label(provider)} API key. Open the API key settings (key icon, bottom-left) and "
+        "update your key."
+    )
 
 
-def _raise_auth_failure():
-    raise HTTPException(status_code=401, detail=_INVALID_KEY_MSG)
+def _raise_auth_failure(provider: LLMProvider):
+    raise HTTPException(status_code=401, detail=_invalid_key_msg(provider))
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    if isinstance(exc, OpenAIAuthError):
+        return True
+    if isinstance(exc, APIStatusError) and exc.status_code in {401, 403}:
+        return True
+    status = getattr(exc, "status_code", None)
+    return status in {401, 403}
+
+
+def require_llm_context(
+    x_llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
+    x_llm_model: Optional[str] = Header(None, alias="X-LLM-Model"),
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
+) -> LLMRequestContext:
+    provider = normalize_provider(x_llm_provider)
+    raw_key = x_openrouter_key if provider == "openrouter" else x_openai_key
+    if not raw_key or not raw_key.strip():
+        raise HTTPException(status_code=401, detail=_missing_key_msg(provider))
+    model = (x_llm_model or "").strip() or None
+    return LLMRequestContext(provider=provider, api_key=raw_key.strip(), model=model)
 
 
 @app.get("/")
 def read_root():
     return {"message": "Causal Tutor API is running"}
 
+
 @app.get("/curriculum-methods")
 async def get_curriculum_methods():
     return CURRICULUM_METHODS
 
+
 @app.get("/config/openai-key")
 def get_openai_key_config():
-    """Returns the OPENAI_API_KEY loaded from .env so the frontend can prefill the
-    user-editable key input. Returns empty string if no env key is set. The .env value
-    is a developer convenience for local testing — actual requests are rejected unless
-    the user explicitly saves a key in the UI (see _require_api_key)."""
+    """Backwards-compatible endpoint for legacy frontend key prefill."""
     env_key = os.getenv("OPENAI_API_KEY", "") or ""
     return {"api_key": env_key, "has_env_key": bool(env_key)}
 
 
+@app.get("/config/llm-config")
+def get_llm_config():
+    providers: List[dict] = []
+    for provider in ("openai", "openrouter"):
+        pid: LLMProvider = normalize_provider(provider)
+        env_var = "OPENROUTER_API_KEY" if pid == "openrouter" else "OPENAI_API_KEY"
+        env_key = os.getenv(env_var, "") or ""
+        providers.append(
+            {
+                "id": pid,
+                "label": provider_label(pid),
+                "default_model": default_model_for(pid, fallback_openai_model="gpt-4o"),
+                "models": model_options(pid),
+                "env_api_key": env_key,
+                "has_env_key": bool(env_key),
+            }
+        )
+    return {"default_provider": DEFAULT_PROVIDER, "providers": providers}
+
+
 class ValidateKeyRequest(BaseModel):
+    provider: str = DEFAULT_PROVIDER
     api_key: str
 
 
 @app.post("/config/validate-key")
-async def validate_openai_key(request: ValidateKeyRequest):
-    """Pre-flight check used by the API key settings UI. Hits OpenAI's cheapest
-    endpoint (`models.list`) to verify the key works."""
+async def validate_key(request: ValidateKeyRequest):
+    provider = normalize_provider(request.provider)
     if not request.api_key or not request.api_key.strip():
         return {"valid": False, "error": "API key is empty."}
     try:
-        test_client = AsyncOpenAI(api_key=request.api_key.strip())
+        test_client = build_async_client(provider, request.api_key.strip())
         await test_client.models.list()
         return {"valid": True}
     except OpenAIAuthError:
-        return {"valid": False, "error": "Invalid API key (OpenAI rejected it)."}
+        return {"valid": False, "error": f"Invalid API key ({provider_label(provider)} rejected it)."}
+    except APIStatusError as e:
+        if e.status_code in {401, 403}:
+            return {"valid": False, "error": f"Invalid API key ({provider_label(provider)} rejected it)."}
+        return {"valid": False, "error": f"Validation failed: HTTP {e.status_code}"}
     except Exception as e:
         return {"valid": False, "error": f"Validation failed: {str(e)[:200]}"}
+
 
 @app.post("/generate-exam", response_model=ExamResponse)
 async def generate_exam_endpoint(
     method_name: str,
     num_questions: int = 5,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
-        return await generate_exam_questions(method_name, num_questions, api_key=api_key)
-    except OpenAIAuthError:
-        _raise_auth_failure()
+        return await generate_exam_questions(
+            method_name,
+            num_questions,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/analyze-project")
 async def analyze_project_endpoint(
     rq_text: str = Form(...),
     pdf_file: Optional[UploadFile] = File(None),
     csv_file: Optional[UploadFile] = File(None),
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
         # 1. Process PDF if present
         pdf_text = None
         if pdf_file and pdf_file.filename.endswith(".pdf"):
             pdf_text = await extract_text_from_pdf(pdf_file)
-        
+
         # 2. Process CSV if present
         dataset_schema = None
         if csv_file and csv_file.filename.endswith(".csv"):
             dataset_schema = await extract_csv_schema(csv_file)
-            
+
         # 3. Construct Synthesis Prompt for Analysis
-        # We combine RQ + PDF Text + Dataset Schema into one context
         synthesis_text = f"Research Question: {rq_text}\n\n"
-        
+
         if dataset_schema:
-            synthesis_text += f"Available Dataset Schema:\nHeaders: {dataset_schema.headers}\nSample Data: {dataset_schema.sample_rows}\n\n"
-            
+            synthesis_text += (
+                f"Available Dataset Schema:\nHeaders: {dataset_schema.headers}\n"
+                f"Sample Data: {dataset_schema.sample_rows}\n\n"
+            )
+
         if pdf_text:
-            synthesis_text += f"Reference Paper Content:\n{pdf_text[:50000]}" # Limit context
-        
-        # 4. Run Analysis
-        analysis = await analyze_paper(synthesis_text, "Research Design Project", api_key=api_key)
-        
+            synthesis_text += f"Reference Paper Content:\n{pdf_text[:50000]}"
+
+        analysis = await analyze_paper(
+            synthesis_text,
+            "Research Design Project",
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
+
         return {
             "project": {
                 "rq_text": rq_text,
                 "pdf_text": pdf_text,
                 "dataset_schema": dataset_schema,
-                "analysis": analysis
+                "analysis": analysis,
             },
             "analysis": analysis,
-            "full_text": synthesis_text
+            "full_text": synthesis_text,
         }
-
-    except OpenAIAuthError:
-        _raise_auth_failure()
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/analyze", response_model=APIAnalysisResponse)
 async def analyze_endpoint(
     file: UploadFile = File(...),
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
-    api_key = _require_api_key(x_openai_key)
-
     try:
-        # Extract text
         text = await extract_text_from_pdf(file)
-
-        # Analyze with LLM
-        analysis = await analyze_paper(text, file.filename, api_key=api_key)
-
-        # Return both analysis and full text for frontend context
+        analysis = await analyze_paper(
+            text,
+            file.filename,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
         return APIAnalysisResponse(analysis=analysis, full_text=text)
-
-    except OpenAIAuthError:
-        _raise_auth_failure()
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/analyze-scenario", response_model=APIAnalysisResponse)
 async def analyze_scenario_endpoint(
     request: AnalyzeTextRequest,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
-        analysis = await analyze_paper(request.text, request.scenario_name, api_key=api_key)
+        analysis = await analyze_paper(
+            request.text,
+            request.scenario_name,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
         return APIAnalysisResponse(analysis=analysis, full_text=request.text)
-    except OpenAIAuthError:
-        _raise_auth_failure()
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 class ChatInput(BaseModel):
     message: str
     history: List[dict]
     paper_text: str
-    analysis_context: Optional[str] = None # Added for context
+    analysis_context: Optional[str] = None
+
 
 @app.post("/chat")
 async def chat_endpoint(
     request: ChatInput,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    # This endpoint streams the response.
-    # Note: we kick off the OpenAI request *before* StreamingResponse so auth errors
-    # surface as proper HTTP 401 (instead of silently failing mid-stream after headers
-    # have already been flushed as 200).
-    api_key = _require_api_key(x_openai_key)
     messages = request.history + [{"role": "user", "content": request.message}]
     try:
-        stream = await chat_with_paper(request.paper_text, request.analysis_context, messages, api_key=api_key)
-    except OpenAIAuthError:
-        _raise_auth_failure()
+        stream = await chat_with_paper(
+            request.paper_text,
+            request.analysis_context,
+            messages,
+            model=llm.model,
+            provider=llm.provider,
+            api_key=llm.api_key,
+        )
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -271,14 +380,13 @@ async def chat_endpoint(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# ── DAG Playground Endpoints ──────────────────────────────────────────────
-
 @app.post("/dag/validate", response_model=DAGValidateResponse)
 async def dag_validate(request: DAGValidateRequest):
     try:
         return validate_dag(request.graph)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -289,6 +397,7 @@ async def dag_d_separation(request: DSeparationRequest):
         return check_d_separation(request.graph, request.node_a, request.node_b, request.conditioning_set)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -299,6 +408,7 @@ async def dag_paths(request: PathsRequest):
         return find_all_paths(request.graph, request.source, request.target)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -317,6 +427,7 @@ async def dag_causal_analysis(request: CausalAnalysisRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -324,17 +435,23 @@ async def dag_causal_analysis(request: CausalAnalysisRequest):
 @app.post("/dag/analyze", response_model=DAGAnalyzeResponse)
 async def dag_analyze(
     request: DAGAnalyzeRequest,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
-        return await analyze_dag_with_gpt(request.graph, request.research_question, api_key=api_key)
-    except OpenAIAuthError:
-        _raise_auth_failure()
+        return await analyze_dag_with_gpt(
+            request.graph,
+            request.research_question,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -342,21 +459,23 @@ async def dag_analyze(
 @app.post("/dag/chat")
 async def dag_chat(
     request: DAGChatRequest,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
         stream = await chat_about_dag(
             request.graph,
             request.history + [{"role": "user", "content": request.message}],
-            api_key=api_key,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
         )
-    except OpenAIAuthError:
-        _raise_auth_failure()
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -369,14 +488,13 @@ async def dag_chat(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# ── Dataset Sandbox Endpoints ─────────────────────────────────────────────
-
 @app.get("/sandbox/queries", response_model=QueriesResponse)
 async def sandbox_queries():
     try:
         return QueriesResponse(queries=load_queries())
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -389,6 +507,7 @@ async def sandbox_dataset(id: str, limit: int = 50):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -401,6 +520,7 @@ async def sandbox_estimate_endpoint(request: EstimateRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -408,17 +528,22 @@ async def sandbox_estimate_endpoint(request: EstimateRequest):
 @app.post("/sandbox/interpret")
 async def sandbox_interpret(
     request: InterpretRequest,
-    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    llm: LLMRequestContext = Depends(require_llm_context),
 ):
-    api_key = _require_api_key(x_openai_key)
     try:
-        stream = await interpret_result(request, api_key=api_key)
-    except OpenAIAuthError:
-        _raise_auth_failure()
+        stream = await interpret_result(
+            request,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
+        )
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -597,17 +722,18 @@ class SCMChatRequest(BaseModel):
     sandbox: Optional[dict] = None
 
 
-# ----- NOT TESTED -----
 @app.post("/scm/chat")
-async def scm_chat(request: SCMChatRequest, x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key")):
-    api_key = _require_api_key(x_openai_key)
-
+async def scm_chat(
+    request: SCMChatRequest,
+    llm: LLMRequestContext = Depends(require_llm_context),
+):
     try:
         stream = await chat_about_scm(
-            # collect contexts
             request.scm_schema,
             request.history + [{"role": "user", "content": request.message}],
-            api_key=api_key,
+            provider=llm.provider,
+            model=llm.model,
+            api_key=llm.api_key,
             active_tab=request.active_tab,
             intervention=request.intervention,
             observational=request.observational,
@@ -615,12 +741,13 @@ async def scm_chat(request: SCMChatRequest, x_openai_key: Optional[str] = Header
             sandbox=request.sandbox,
         )
 
-    except OpenAIAuthError:
-        _raise_auth_failure()
     except HTTPException:
         raise
     except Exception as e:
+        if _is_auth_error(e):
+            _raise_auth_failure(llm.provider)
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

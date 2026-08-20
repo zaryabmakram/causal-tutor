@@ -1,34 +1,43 @@
 import io
-import os
 import json
 import pandas as pd
 from typing import List, Optional
 from fastapi import UploadFile
 from pypdf import PdfReader
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from .models import CausalQueryResponse, DatasetSchema, ExamResponse, ExamQuestion
+from .llm_provider import (
+    LLMProvider,
+    build_async_client,
+    env_key_for,
+    resolve_model,
+)
 
 # Load environment variables (used only as a local-dev convenience; the prefilled
 # value lets the dev populate the UI input without retyping their key on every restart).
 load_dotenv()
 
 
-def _get_client(api_key: Optional[str] = None) -> AsyncOpenAI:
+def _get_client(provider: LLMProvider, api_key: Optional[str] = None):
     """Build a per-request OpenAI client. Endpoints in main.py reject requests
     that don't supply an API key (`_require_api_key`) before reaching this function,
     so `api_key` is normally non-empty here. Falls back to the env value if present
     purely as a safety net for dev tooling that bypasses the API layer."""
-    effective = api_key or os.getenv("OPENAI_API_KEY")
+    effective = api_key or env_key_for(provider)
     if not effective:
         raise RuntimeError(
-            "OpenAI API key not provided. The endpoint should reject this earlier; "
+            "LLM API key not provided. The endpoint should reject this earlier; "
             "see main.py:_require_api_key."
         )
-    return AsyncOpenAI(api_key=effective)
+    return build_async_client(provider, effective)
 
 
-async def generate_single_question(method_name: str, api_key: Optional[str] = None) -> ExamQuestion:
+async def generate_single_question(
+    method_name: str,
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> ExamQuestion:
     prompt = f"""Generate exactly 1 high-quality multiple-choice exam question to test a student's understanding of the causal method: {method_name}.
     
     Focus on:
@@ -49,8 +58,8 @@ async def generate_single_question(method_name: str, api_key: Optional[str] = No
         }
     ]
     
-    completion = await _get_client(api_key).chat.completions.create(
-        model="gpt-4o-mini", # Fallback to gpt-4o-mini due to SDK versioning issues with gpt-5
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o-mini"),
         messages=[{"role": "user", "content": prompt}],
         tools=tools,
         tool_choice={"type": "function", "function": {"name": "provide_exam_question"}}
@@ -59,12 +68,21 @@ async def generate_single_question(method_name: str, api_key: Optional[str] = No
     tool_call = completion.choices[0].message.tool_calls[0]
     return ExamQuestion(**json.loads(tool_call.function.arguments))
 
-async def generate_exam_questions(method_name: str, num_questions: int = 15, api_key: Optional[str] = None) -> ExamResponse:
+async def generate_exam_questions(
+    method_name: str,
+    num_questions: int = 15,
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> ExamResponse:
     # Use asyncio.gather to generate questions in parallel
     import asyncio
 
     # We generate num_questions (default 15) in parallel
-    tasks = [generate_single_question(method_name, api_key=api_key) for _ in range(num_questions)]
+    tasks = [
+        generate_single_question(method_name, provider=provider, model=model, api_key=api_key)
+        for _ in range(num_questions)
+    ]
     questions = await asyncio.gather(*tasks)
 
     return ExamResponse(
@@ -130,7 +148,13 @@ CITATION RULES:
 Return the output in the specified JSON structure.
 """
 
-async def analyze_paper(text: str, filename: str, api_key: Optional[str] = None) -> CausalQueryResponse:
+async def analyze_paper(
+    text: str,
+    filename: str,
+    provider: LLMProvider = "openai",
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> CausalQueryResponse:
     tools = [
         {
             "type": "function",
@@ -142,8 +166,8 @@ async def analyze_paper(text: str, filename: str, api_key: Optional[str] = None)
         }
     ]
 
-    completion = await _get_client(api_key).chat.completions.create(
-        model="gpt-4o", # Fallback to gpt-4o due to SDK versioning issues with gpt-5
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o"),
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Analyze the following text/paper: {filename}\n\n{text[:100000]}"}
@@ -155,7 +179,14 @@ async def analyze_paper(text: str, filename: str, api_key: Optional[str] = None)
     tool_call = completion.choices[0].message.tool_calls[0]
     return CausalQueryResponse(**json.loads(tool_call.function.arguments))
 
-async def chat_with_paper(paper_text: str, analysis_context: Optional[str], messages: List[dict], model: str = "gpt-4o", api_key: Optional[str] = None):
+async def chat_with_paper(
+    paper_text: str,
+    analysis_context: Optional[str],
+    messages: List[dict],
+    model: Optional[str] = None,
+    provider: LLMProvider = "openai",
+    api_key: Optional[str] = None,
+):
     system_prompt_content = f"""You are a helpful and Socratic Causal Tutor. Your goal is to help students understand the causal inference methods used in the provided research paper or scenario.
 
 Current Analysis Context:
@@ -184,8 +215,8 @@ Instructions for Tutor:
         if m["role"] in ["user", "assistant"]:
             formatted_messages.append({"role": m["role"], "content": m["content"]})
     
-    completion = await _get_client(api_key).chat.completions.create(
-        model=model, # Fallback to gpt-4o
+    completion = await _get_client(provider, api_key).chat.completions.create(
+        model=resolve_model(provider, model, fallback_openai_model="gpt-4o"),
         messages=formatted_messages,
         stream=True
     )

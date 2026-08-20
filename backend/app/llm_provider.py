@@ -12,26 +12,63 @@ DEFAULT_PROVIDER: LLMProvider = "openai"
 # Minimal curated model lists to keep the UI stable and avoid unsupported IDs.
 _MODEL_OPTIONS: Dict[LLMProvider, List[Dict[str, str]]] = {
     "openai": [
-        {"id": "gpt-4o", "label": "GPT-4o"},
-        {"id": "gpt-4o-mini", "label": "GPT-4o Mini"},
+        {"id": "gpt-5.6", "label": "OpenAI GPT-5.6 Sol"},
+        {"id": "gpt-5.6-pro", "label": "OpenAI GPT-5.6 Sol Pro"},
+        {"id": "gpt-5.6-terra", "label": "OpenAI GPT-5.6 Terra"},
+        {"id": "gpt-5.6-terra-pro", "label": "OpenAI GPT-5.6 Terra Pro"},
+        {"id": "gpt-5.6-luna-pro", "label": "OpenAI GPT-5.6 Luna Pro"},
+        {"id": "gpt-5.5", "label": "OpenAI GPT-5.5"},
+        {"id": "gpt-5.4-mini", "label": "OpenAI GPT-5.4 Mini"},
+        {"id": "gpt-5.4-nano", "label": "OpenAI GPT-5.4 Nano"},
+        {"id": "gpt-4o", "label": "OpenAI GPT-4o"},
+        {"id": "gpt-4o-mini", "label": "OpenAI GPT-4o Mini"},
     ],
     "openrouter": [
+        # OpenAI
+        {"id": "openai/gpt-5.6-sol", "label": "OpenAI GPT-5.6 Sol"},
+        {"id": "openai/gpt-5.6-sol-pro", "label": "OpenAI GPT-5.6 Sol Pro"},
+        {"id": "openai/gpt-5.6-terra", "label": "OpenAI GPT-5.6 Terra"},
+        {"id": "openai/gpt-5.6-terra-pro", "label": "OpenAI GPT-5.6 Terra Pro"},
+        {"id": "openai/gpt-5.6-luna-pro", "label": "OpenAI GPT-5.6 Luna Pro"},
+        {"id": "openai/gpt-5.5", "label": "OpenAI GPT-5.5"},
+        {"id": "openai/gpt-5.4-mini", "label": "OpenAI GPT-5.4 Mini"},
+        {"id": "openai/gpt-5.4-nano", "label": "OpenAI GPT-5.4 Nano"},
         {"id": "openai/gpt-4o", "label": "OpenAI GPT-4o"},
         {"id": "openai/gpt-4o-mini", "label": "OpenAI GPT-4o Mini"},
-        {"id": "openai/gpt-5", "label": "OpenAI GPT-5"},
-        {"id": "openai/gpt-5-mini", "label": "OpenAI GPT-5 Mini"},
-        {"id": "anthropic/claude-3.5-sonnet", "label": "Anthropic Claude 3.5 Sonnet"},
-        {"id": "anthropic/claude-opus-4", "label": "Anthropic Claude Opus 4"},
-        {"id": "google/gemini-2.0-pro", "label": "Google Gemini 2.0 Pro"},
-        {"id": "meta-llama/llama-3.1-405b-instruct", "label": "Meta Llama 3.1 405B Instruct"},
-        {"id": "qwen/qwen-2.5-72b-instruct", "label": "Qwen 2.5 72B Instruct"},
-        {"id": "mistralai/mixtral-8x22b-instruct", "label": "Mixtral 8x22B Instruct"},
-        {"id": "meta-llama/llama-3.2-3b-instruct", "label": "Meta Llama 3.2 3B Instruct"},
-        {"id": "qwen/qwen-2.5-7b-instruct", "label": "Qwen 2.5 7B Instruct"},
+
+        # Anthropic
+        {"id": "anthropic/claude-opus-5", "label": "Anthropic Claude Opus 5"},
+        {"id": "anthropic/claude-opus-4.8", "label": "Anthropic Claude Opus 4.8"},
+        {"id": "anthropic/claude-sonnet-5", "label": "Anthropic Claude Sonnet 5"},
+        {"id": "anthropic/claude-sonnet-4.6", "label": "Anthropic Claude Sonnet 4.6"},
+
+        # Google
+        {"id": "google/gemini-3.7-pro", "label": "Google Gemini 3.7 Pro"},
+        {"id": "google/gemini-3.7-flash", "label": "Google Gemini 3.7 Flash"},
+
+        # xAI
+        {"id": "x-ai/grok-4.5", "label": "xAI Grok 4.5"},
+
+        # DeepSeek
+        {"id": "deepseek/deepseek-v4", "label": "DeepSeek V4"},
+
+        # Z.ai
+        {"id": "z-ai/glm-5.3", "label": "Z.ai GLM 5.3"},
+
+        # Moonshot AI
+        {"id": "moonshotai/kimi-k3", "label": "Moonshot Kimi K3"},
     ],
 }
 
 _OPENAI_TO_OPENROUTER = {
+    "gpt-5.6": "openai/gpt-5.6-sol",
+    "gpt-5.6-pro": "openai/gpt-5.6-sol-pro",
+    "gpt-5.6-terra": "openai/gpt-5.6-terra",
+    "gpt-5.6-terra-pro": "openai/gpt-5.6-terra-pro",
+    "gpt-5.6-luna-pro": "openai/gpt-5.6-luna-pro",
+    "gpt-5.5": "openai/gpt-5.5",
+    "gpt-5.4-mini": "openai/gpt-5.4-mini",
+    "gpt-5.4-nano": "openai/gpt-5.4-nano",
     "gpt-4o": "openai/gpt-4o",
     "gpt-4o-mini": "openai/gpt-4o-mini",
 }

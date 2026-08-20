@@ -671,6 +671,28 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     [setEdges]
   );
 
+  const applyDSeparationHighlights = useCallback(
+    (result: DSeparationResult) => {
+      const activeEdges = new Set<string>();
+      result.active_paths.forEach((path) => {
+        for (let i = 0; i < path.length - 1; i++) {
+          activeEdges.add(`e-${path[i]}-${path[i + 1]}`);
+          activeEdges.add(`e-${path[i + 1]}-${path[i]}`);
+        }
+      });
+
+      setEdges((eds) =>
+        eds.map((e) => ({
+          ...e,
+          animated: activeEdges.has(e.id),
+          style: activeEdges.has(e.id)
+            ? { stroke: "#f43f5e", strokeWidth: 3 }
+            : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
+        }))
+      );
+    },
+    [setEdges]
+  );
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
@@ -1004,12 +1026,13 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         });
         setDSepResult(res.data);
         dSepAutoSigRef.current = currentGraphSignature;
+        applyDSeparationHighlights(res.data);
       } catch (err) {
         console.error(err);
         showToast("Failed to check d-separation");
       }
     },
-    [nodes, edges, showToast, currentGraphSignature]
+    [nodes, edges, applyDSeparationHighlights, showToast, currentGraphSignature]
   );
 
   const onNodeClick = useCallback(
@@ -1741,18 +1764,108 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
                   )}
                 </div>
               </div>
-              <div className="p-4">
-                <div className="prose prose-sm max-w-none text-[13px] text-slate-700">
-                  <ReactMarkdown>{dSepResult.explanation}</ReactMarkdown>
+              <div className="p-4 space-y-4 max-h-[420px] overflow-y-auto">
+                <div
+                  className={`rounded-xl border p-3 ${
+                    dSepResult.d_separated
+                      ? "bg-emerald-50 border-emerald-100"
+                      : "bg-rose-50 border-rose-100"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`mt-0.5 rounded-full p-1.5 ${
+                        dSepResult.d_separated
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-rose-100 text-rose-700"
+                      }`}
+                    >
+                      {dSepResult.d_separated ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                    </div>
+                    <div>
+                      <div className={`text-sm font-bold ${dSepResult.d_separated ? "text-emerald-800" : "text-rose-800"}`}>
+                        {dSepResult.d_separated
+                          ? `${nodeLabels[dSepNodeA!] || dSepNodeA} and ${nodeLabels[dSepNodeB!] || dSepNodeB} are d-separated`
+                          : `${nodeLabels[dSepNodeA!] || dSepNodeA} and ${nodeLabels[dSepNodeB!] || dSepNodeB} are connected by active path(s)`}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Given {conditioningSet.length > 0 ? "the selected conditioning set" : "no conditioning variables"}.
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Active paths</h4>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      {dSepResult.active_paths.length}
+                    </span>
+                  </div>
+                  {dSepResult.active_paths.length === 0 ? (
+                    <div className="rounded-xl border border-emerald-100 bg-white p-3 text-sm text-slate-600">
+                      No active paths remain after conditioning, so the variables are independent in this DAG.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {dSepResult.active_paths.map((path, pathIndex) => (
+                        <div key={`${path.join("-")}-${pathIndex}`} className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-700">
+                              Open path {pathIndex + 1}
+                            </span>
+                            <span className="text-[11px] text-slate-400">{path.length} nodes</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {path.map((nodeId, nodeIndex) => (
+                              <span key={`${nodeId}-${nodeIndex}`} className="flex items-center gap-1.5">
+                                <span
+                                  className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
+                                    conditioningSet.includes(nodeId)
+                                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                                      : nodeId === dSepNodeA
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : nodeId === dSepNodeB
+                                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-700"
+                                  }`}
+                                >
+                                  {nodeLabels[nodeId] || nodeId}
+                                </span>
+                                {nodeIndex < path.length - 1 && <span className="text-slate-300">→</span>}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {conditioningSet.length > 0 && (
-                  <div className="mt-3 text-xs text-slate-500">
-                    <span className="font-medium">Conditioning on:</span>{" "}
-                    {conditioningSet.map((n) => nodeLabels[n] || n).join(", ")}
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Conditioning on</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {conditioningSet.map((n) => (
+                        <span key={n} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                          {nodeLabels[n] || n}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <p className="mt-2 text-[11px] text-slate-400">
-                  Click other nodes to add/remove them from the conditioning set.
+
+                <details className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Explanation
+                  </summary>
+                  <div className="prose prose-sm mt-2 max-w-none text-[13px] text-slate-700">
+                    <ReactMarkdown>{dSepResult.explanation}</ReactMarkdown>
+                  </div>
+                </details>
+
+                <p className="text-[11px] text-slate-400">
+                  Click other nodes to add/remove them from the conditioning set. Active paths are highlighted on the graph.
                 </p>
               </div>
             </div>

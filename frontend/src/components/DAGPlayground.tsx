@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type CSSProperties } from "react";
 import {
   ReactFlow,
   Controls,
@@ -184,7 +184,11 @@ function DAGNode({ id, data, selected }: NodeProps) {
 }
 
 const nodeTypes: NodeTypes = { dagNode: DAGNode };
-type DeletableEdgeData = { onDelete?: (edgeId: string) => void };
+type DeletableEdgeData = {
+  onDelete?: (edgeId: string) => void;
+  pathFlow?: { color: string; reverse?: boolean };
+};
+type NodePair = { source: string; target: string };
 
 function DeletableEdge({
   id,
@@ -208,10 +212,20 @@ function DeletableEdge({
     targetPosition,
   });
   const edgeData = data as DeletableEdgeData | undefined;
+  const flow = edgeData?.pathFlow;
+  const flowStyle: CSSProperties | undefined = flow
+    ? {
+        ...style,
+        stroke: flow.color,
+        strokeDasharray: "7 7",
+        strokeLinecap: "round",
+        animation: `${flow.reverse ? "dag-path-flow-reverse" : "dag-path-flow-forward"} 0.9s linear infinite`,
+      }
+    : style;
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={flowStyle} />
       {selected && (
         <EdgeLabelRenderer>
           <button
@@ -406,6 +420,17 @@ function toGraphPayload(nodes: Node[], edges: Edge[]) {
   };
 }
 
+function graphSignature(nodes: Node[], edges: Edge[]) {
+  return JSON.stringify({
+    nodes: nodes
+      .map((n) => ({ id: n.id, label: (n.data.label as string) || n.id }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    edges: edges
+      .map((e) => ({ source: e.source, target: e.target }))
+      .sort((a, b) => `${a.source}->${a.target}`.localeCompare(`${b.source}->${b.target}`)),
+  });
+}
+
 // ── Main Component ───────────────────────────────────────────────────────
 
 interface DAGPlaygroundProps {
@@ -437,6 +462,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   // Interaction modes
   const [interactionMode, setInteractionMode] = useState<"default" | "path_select" | "d_separation">("default");
   const [selectedNodeForPath, setSelectedNodeForPath] = useState<string | null>(null);
+  const [activePathQuery, setActivePathQuery] = useState<NodePair | null>(null);
   const [conditioningSet, setConditioningSet] = useState<string[]>([]);
   const [dSepNodeA, setDSepNodeA] = useState<string | null>(null);
   const [dSepNodeB, setDSepNodeB] = useState<string | null>(null);
@@ -454,6 +480,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   const [edgeAnalysisLoading, setEdgeAnalysisLoading] = useState(false);
   const [showEdgePanel, setShowEdgePanel] = useState(false);
   const [selectedEdgeLabel, setSelectedEdgeLabel] = useState("");
+  const [activeEdgeQuery, setActiveEdgeQuery] = useState<NodePair | null>(null);
 
   // ── Causal Analysis (persistent T/Y/Z roles + backdoor analysis) ──
   const [causalPanelOpen, setCausalPanelOpen] = useState(false);
@@ -463,6 +490,11 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   const [assignMode, setAssignMode] = useState<"T" | "Y" | "Z" | null>(null);
   const [causalResult, setCausalResult] = useState<CausalAnalysisResult | null>(null);
   const [causalLoading, setCausalLoading] = useState(false);
+  const currentGraphSignature = useMemo(() => graphSignature(nodes, edges), [nodes, edges]);
+  const pathAutoSigRef = useRef<string | null>(null);
+  const dSepAutoSigRef = useRef<string | null>(null);
+  const edgeAutoSigRef = useRef<string | null>(null);
+  const causalAutoSigRef = useRef<string | null>(null);
 
   // ── Toast helper ──
 
@@ -529,6 +561,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
       setEdges((eds) =>
         eds.map((e) => ({
           ...e,
+          data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined },
           animated: false,
           style: { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
         }))
@@ -542,6 +575,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     const blockedSet = new Set<string>();
     const directedOpenSet = new Set<string>();
     const backdoorOpenSet = new Set<string>();
+    const openPathFlows = new Map<string, { color: string; reverse?: boolean }>();
 
     causalResult.paths.forEach((p) => {
       for (let i = 0; i < p.path.length - 1; i++) {
@@ -555,26 +589,32 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         } else if (p.path_type === "directed") {
           directedOpenSet.add(eid1);
           directedOpenSet.add(eid2);
+          if (!openPathFlows.has(eid1)) openPathFlows.set(eid1, { color: "#10b981", reverse: false });
+          if (!openPathFlows.has(eid2)) openPathFlows.set(eid2, { color: "#10b981", reverse: true });
         } else {
           backdoorOpenSet.add(eid1);
           backdoorOpenSet.add(eid2);
+          openPathFlows.set(eid1, { color: "#f43f5e", reverse: false });
+          openPathFlows.set(eid2, { color: "#f43f5e", reverse: true });
         }
       }
     });
 
     setEdges((eds) =>
       eds.map((e) => {
+        const flow = openPathFlows.get(e.id);
+        const data = { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow };
         // Open paths take precedence over blocked classification when an edge appears in both
         if (backdoorOpenSet.has(e.id)) {
-          return { ...e, animated: true, style: { stroke: "#f43f5e", strokeWidth: 2.5 } };
+          return { ...e, data, animated: false, style: { stroke: "#f43f5e", strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined } };
         }
         if (directedOpenSet.has(e.id)) {
-          return { ...e, animated: false, style: { stroke: "#10b981", strokeWidth: 2.5 } };
+          return { ...e, data, animated: false, style: { stroke: "#10b981", strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined } };
         }
         if (blockedSet.has(e.id)) {
-          return { ...e, animated: false, style: { stroke: "#cbd5e1", strokeWidth: 1.5, strokeDasharray: "5 5", opacity: 0.6 } };
+          return { ...e, data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined }, animated: false, style: { stroke: "#cbd5e1", strokeWidth: 1.5, strokeDasharray: "5 5", opacity: 0.6 } };
         }
-        return e;
+        return { ...e, data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined } };
       })
     );
   }, [causalResult, setEdges]);
@@ -597,13 +637,14 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         }
       );
       setCausalResult(res.data);
+      causalAutoSigRef.current = currentGraphSignature;
     } catch (err) {
       console.error(err);
       showToast("Failed to run causal analysis");
     } finally {
       setCausalLoading(false);
     }
-  }, [treatmentId, outcomeId, confounderIds, nodes, edges, showToast]);
+  }, [treatmentId, outcomeId, confounderIds, nodes, edges, showToast, currentGraphSignature]);
 
   // ── Clear causal result (the useEffect above resets edge styling) ──
   const clearCausalResult = useCallback(() => {
@@ -620,12 +661,76 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     return map;
   }, [nodes]);
 
+  const applyPathHighlights = useCallback(
+    (result: PathsResponse) => {
+      const edgeFlows = new Map<string, { color: string; reverse?: boolean }>();
+      result.all_paths.forEach((p: PathInfo) => {
+        for (let i = 0; i < p.path.length - 1; i++) {
+          const a = p.path[i];
+          const b = p.path[i + 1];
+          const color = p.path_type === "directed" ? "#10b981" : p.path_type === "backdoor" ? "#f43f5e" : "#6366f1";
+          edgeFlows.set(`e-${a}-${b}`, { color, reverse: false });
+          edgeFlows.set(`e-${b}-${a}`, { color, reverse: true });
+        }
+      });
+
+      setEdges((eds) =>
+        eds.map((e) => {
+          const flow = edgeFlows.get(e.id);
+          return {
+            ...e,
+            data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow },
+            animated: false,
+            style: flow
+              ? { ...e.style, stroke: flow.color, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined }
+              : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
+          };
+        })
+      );
+    },
+    [setEdges]
+  );
+
+  const applyDSeparationHighlights = useCallback(
+    (result: DSeparationResult) => {
+      const activeEdgeFlows = new Map<string, { color: string; reverse?: boolean }>();
+      result.active_paths.forEach((path) => {
+        for (let i = 0; i < path.length - 1; i++) {
+          const from = path[i];
+          const to = path[i + 1];
+          activeEdgeFlows.set(`e-${from}-${to}`, { color: "#f43f5e", reverse: false });
+          activeEdgeFlows.set(`e-${to}-${from}`, { color: "#f43f5e", reverse: true });
+        }
+      });
+
+      setEdges((eds) =>
+        eds.map((e) => {
+          const flow = activeEdgeFlows.get(e.id);
+          const data = { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow };
+          return {
+            ...e,
+            data,
+            animated: false,
+            style: flow
+              ? { ...e.style, stroke: "#f43f5e", strokeWidth: undefined }
+              : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
+          };
+        })
+      );
+    },
+    [setEdges]
+  );
+
   const deleteEdge = useCallback(
     (edgeId: string) => {
       setEdges((eds) => eds.filter((edge) => edge.id !== edgeId));
-      setShowEdgePanel(false);
-      setEdgeAnalysis(null);
-      setSelectedEdgeLabel("");
+      setActiveEdgeQuery((query) => {
+        if (!query || `e-${query.source}-${query.target}` !== edgeId) return query;
+        setShowEdgePanel(false);
+        setEdgeAnalysis(null);
+        setSelectedEdgeLabel("");
+        return null;
+      });
     },
     [setEdges]
   );
@@ -634,22 +739,34 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     setTreatmentId((id) => (id === nodeId ? null : id));
     setOutcomeId((id) => (id === nodeId ? null : id));
     setConfounderIds((ids) => ids.filter((id) => id !== nodeId));
-    setPathsResult(null);
-    setDSepResult(null);
-    setEdgeAnalysis(null);
+    setActivePathQuery((query) => {
+      if (!query || (query.source !== nodeId && query.target !== nodeId)) return query;
+      setPathsResult(null);
+      return null;
+    });
+    setActiveEdgeQuery((query) => {
+      if (!query || (query.source !== nodeId && query.target !== nodeId)) return query;
+      setEdgeAnalysis(null);
+      setShowEdgePanel(false);
+      setSelectedEdgeLabel("");
+      return null;
+    });
     setDagAnalysis(null);
-    setShowEdgePanel(false);
     setShowAnalysisModal(false);
-    setSelectedEdgeLabel("");
     setSelectedNodeForPath((id) => (id === nodeId ? null : id));
     setConditioningSet((ids) => ids.filter((id) => id !== nodeId));
     setDSepNodeA((id) => (id === nodeId ? null : id));
     setDSepNodeB((id) => (id === nodeId ? null : id));
-    setDSepStage("select_a");
-    setInteractionMode("default");
-    setCausalResult(null);
+    if (dSepNodeA === nodeId || dSepNodeB === nodeId) {
+      setDSepResult(null);
+      setDSepStage("select_a");
+      setInteractionMode("default");
+    }
+    if (treatmentId === nodeId || outcomeId === nodeId) {
+      setCausalResult(null);
+    }
     setAssignMode(null);
-  }, []);
+  }, [dSepNodeA, dSepNodeB, outcomeId, treatmentId]);
 
   const deleteNode = useCallback(
     (nodeId: string) => {
@@ -680,9 +797,14 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
   const handleEdgesDelete = useCallback(
     (deletedEdges: Edge[]) => {
       if (deletedEdges.length === 0) return;
-      setShowEdgePanel(false);
-      setEdgeAnalysis(null);
-      setSelectedEdgeLabel("");
+      const deletedIds = new Set(deletedEdges.map((edge) => edge.id));
+      setActiveEdgeQuery((query) => {
+        if (!query || !deletedIds.has(`e-${query.source}-${query.target}`)) return query;
+        setShowEdgePanel(false);
+        setEdgeAnalysis(null);
+        setSelectedEdgeLabel("");
+        return null;
+      });
     },
     []
   );
@@ -706,6 +828,11 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
   const onConnect = useCallback(
     async (connection: Connection) => {
+      // Edge creation should only be possible in the normal editing mode.
+      // In path / d-separation / role-assignment modes, node clicks can start
+      // on our invisible boundary handles; without this guard React Flow may
+      // interpret the click sequence as a connection gesture.
+      if (interactionMode !== "default" || assignMode) return;
       if (!connection.source || !connection.target) return;
       if (connection.source === connection.target) return;
 
@@ -742,7 +869,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
       setEdges(updatedEdges);
     },
-    [edges, nodes, setEdges, showToast, deleteEdge]
+    [edges, nodes, setEdges, showToast, deleteEdge, interactionMode, assignMode]
   );
 
   // ── Add node ──
@@ -843,6 +970,8 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     setShowEdgePanel(false);
     setShowAnalysisModal(false);
     setSelectedNodeForPath(null);
+    setActivePathQuery(null);
+    setActiveEdgeQuery(null);
     setConditioningSet([]);
     setDSepNodeA(null);
     setDSepNodeB(null);
@@ -873,8 +1002,9 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     setEdges((eds) =>
       eds.map((e) => ({
         ...e,
+        data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined },
         animated: false,
-        style: { ...e.style, stroke: undefined, strokeWidth: undefined },
+        style: { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
       }))
     );
   }, [setEdges]);
@@ -888,6 +1018,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
       setEdgeAnalysisLoading(true);
       setShowEdgePanel(true);
+      setActiveEdgeQuery({ source: edge.source, target: edge.target });
       setSelectedEdgeLabel(`${nodeLabels[edge.source] || edge.source} → ${nodeLabels[edge.target] || edge.target}`);
 
       try {
@@ -898,6 +1029,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
           target: edge.target,
         });
         setEdgeAnalysis(res.data);
+        edgeAutoSigRef.current = currentGraphSignature;
       } catch (err) {
         console.error(err);
         showToast("Failed to analyze edge");
@@ -905,10 +1037,31 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         setEdgeAnalysisLoading(false);
       }
     },
-    [nodes, edges, nodeLabels, interactionMode, showToast]
+    [nodes, edges, nodeLabels, interactionMode, showToast, currentGraphSignature]
   );
 
   // ── Node click handler (mode-dependent) ──
+
+  const queryDSeparation = useCallback(
+    async (nodeA: string, nodeB: string, condSet: string[]) => {
+      try {
+        const graph = toGraphPayload(nodes, edges);
+        const res = await axios.post<DSeparationResult>(apiUrl("/dag/d-separation"), {
+          graph,
+          node_a: nodeA,
+          node_b: nodeB,
+          conditioning_set: condSet,
+        });
+        setDSepResult(res.data);
+        dSepAutoSigRef.current = currentGraphSignature;
+        applyDSeparationHighlights(res.data);
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to check d-separation");
+      }
+    },
+    [nodes, edges, applyDSeparationHighlights, showToast, currentGraphSignature]
+  );
 
   const onNodeClick = useCallback(
     async (_: React.MouseEvent, node: Node) => {
@@ -976,34 +1129,9 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
               target,
             });
             setPathsResult(res.data);
-
-            // Highlight edges on paths
-            const edgesOnPaths = new Set<string>();
-            const edgeColors: Record<string, string> = {};
-            res.data.all_paths.forEach((p: PathInfo) => {
-              for (let i = 0; i < p.path.length - 1; i++) {
-                const a = p.path[i];
-                const b = p.path[i + 1];
-                // Check both directions for undirected path
-                const eid1 = `e-${a}-${b}`;
-                const eid2 = `e-${b}-${a}`;
-                edgesOnPaths.add(eid1);
-                edgesOnPaths.add(eid2);
-                const color = p.path_type === "directed" ? "#10b981" : p.path_type === "backdoor" ? "#f43f5e" : "#6366f1";
-                edgeColors[eid1] = color;
-                edgeColors[eid2] = color;
-              }
-            });
-
-            setEdges((eds) =>
-              eds.map((e) => ({
-                ...e,
-                animated: edgesOnPaths.has(e.id),
-                style: edgesOnPaths.has(e.id)
-                  ? { stroke: edgeColors[e.id] || "#6366f1", strokeWidth: 3 }
-                  : { stroke: undefined, strokeWidth: undefined },
-              }))
-            );
+            setActivePathQuery({ source, target });
+            pathAutoSigRef.current = currentGraphSignature;
+            applyPathHighlights(res.data);
           } catch (err) {
             console.error(err);
             showToast("Failed to find paths");
@@ -1066,26 +1194,110 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         }
       }
     },
-    [interactionMode, selectedNodeForPath, dSepStage, dSepNodeA, dSepNodeB, nodes, edges, setNodes, setEdges, showToast]
+    [interactionMode, selectedNodeForPath, dSepStage, dSepNodeA, dSepNodeB, nodes, edges, setNodes, showToast, assignMode, outcomeId, confounderIds, treatmentId, applyPathHighlights, queryDSeparation, currentGraphSignature]
   );
 
-  // ── D-separation query ──
-
-  const queryDSeparation = async (nodeA: string, nodeB: string, condSet: string[]) => {
-    try {
-      const graph = toGraphPayload(nodes, edges);
-      const res = await axios.post<DSeparationResult>(apiUrl("/dag/d-separation"), {
-        graph,
-        node_a: nodeA,
-        node_b: nodeB,
-        conditioning_set: condSet,
-      });
-      setDSepResult(res.data);
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to check d-separation");
+  useEffect(() => {
+    if (interactionMode !== "path_select" || !activePathQuery || !pathsResult) return;
+    if (pathAutoSigRef.current === currentGraphSignature) return;
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    if (!nodeIds.has(activePathQuery.source) || !nodeIds.has(activePathQuery.target)) {
+      setPathsResult(null);
+      setActivePathQuery(null);
+      resetEdgeHighlights();
+      return;
     }
-  };
+
+    const timer = setTimeout(async () => {
+      try {
+        const graph = toGraphPayload(nodes, edges);
+        const res = await axios.post<PathsResponse>(apiUrl("/dag/paths"), {
+          graph,
+          source: activePathQuery.source,
+          target: activePathQuery.target,
+        });
+        setPathsResult(res.data);
+        pathAutoSigRef.current = currentGraphSignature;
+        applyPathHighlights(res.data);
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to refresh paths");
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [currentGraphSignature, interactionMode, activePathQuery, pathsResult, nodes, edges, applyPathHighlights, resetEdgeHighlights, showToast]);
+
+  useEffect(() => {
+    if (!showEdgePanel || !activeEdgeQuery || !edgeAnalysis) return;
+    if (edgeAutoSigRef.current === currentGraphSignature) return;
+    const selectedEdgeStillExists = edges.some((e) => e.source === activeEdgeQuery.source && e.target === activeEdgeQuery.target);
+    if (!selectedEdgeStillExists) {
+      setShowEdgePanel(false);
+      setEdgeAnalysis(null);
+      setActiveEdgeQuery(null);
+      setSelectedEdgeLabel("");
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setEdgeAnalysisLoading(true);
+      try {
+        const graph = toGraphPayload(nodes, edges);
+        const res = await axios.post<PathsResponse>(apiUrl("/dag/paths"), {
+          graph,
+          source: activeEdgeQuery.source,
+          target: activeEdgeQuery.target,
+        });
+        setEdgeAnalysis(res.data);
+        edgeAutoSigRef.current = currentGraphSignature;
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to refresh edge analysis");
+      } finally {
+        setEdgeAnalysisLoading(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [currentGraphSignature, showEdgePanel, activeEdgeQuery, edgeAnalysis, nodes, edges, showToast]);
+
+  useEffect(() => {
+    if (interactionMode !== "d_separation" || !dSepResult || !dSepNodeA || !dSepNodeB) return;
+    if (dSepAutoSigRef.current === currentGraphSignature) return;
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    if (!nodeIds.has(dSepNodeA) || !nodeIds.has(dSepNodeB)) {
+      setDSepResult(null);
+      resetEdgeHighlights();
+      return;
+    }
+    const validConditioningSet = conditioningSet.filter((id) => nodeIds.has(id));
+    if (validConditioningSet.length !== conditioningSet.length) {
+      setConditioningSet(validConditioningSet);
+    }
+
+    const timer = setTimeout(() => {
+      queryDSeparation(dSepNodeA, dSepNodeB, validConditioningSet);
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [currentGraphSignature, interactionMode, dSepResult, dSepNodeA, dSepNodeB, conditioningSet, nodes, queryDSeparation, resetEdgeHighlights]);
+
+  useEffect(() => {
+    if (!causalResult || !treatmentId || !outcomeId) return;
+    if (causalAutoSigRef.current === currentGraphSignature) return;
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    if (!nodeIds.has(treatmentId) || !nodeIds.has(outcomeId)) {
+      setCausalResult(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      runCausalAnalysis();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [currentGraphSignature, causalResult, treatmentId, outcomeId, nodes, runCausalAnalysis]);
 
   // ── Toggle path selection mode ──
 
@@ -1094,6 +1306,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
       setInteractionMode("default");
       setSelectedNodeForPath(null);
       setPathsResult(null);
+      setActivePathQuery(null);
       resetNodeHighlights();
       resetEdgeHighlights();
     } else {
@@ -1124,6 +1337,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
       setInteractionMode("d_separation");
       setSelectedNodeForPath(null);
       setPathsResult(null);
+      setActivePathQuery(null);
       setDSepStage("select_a");
       resetNodeHighlights();
       resetEdgeHighlights();
@@ -1187,6 +1401,25 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
   return (
     <div className="flex h-full w-full bg-white overflow-hidden">
+      <style jsx global>{`
+        @keyframes dag-path-flow-forward {
+          from {
+            stroke-dashoffset: 0;
+          }
+          to {
+            stroke-dashoffset: -14;
+          }
+        }
+
+        @keyframes dag-path-flow-reverse {
+          from {
+            stroke-dashoffset: 0;
+          }
+          to {
+            stroke-dashoffset: 14;
+          }
+        }
+      `}</style>
       {/* Main Area */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header / Toolbar */}
@@ -1388,6 +1621,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             connectionMode={ConnectionMode.Loose}
+            nodesConnectable={interactionMode === "default" && !assignMode}
             fitView
             defaultEdgeOptions={{
               markerEnd: { type: MarkerType.ArrowClosed },
@@ -1450,7 +1684,10 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
                   <span className="text-sm font-semibold text-slate-800">{selectedEdgeLabel}</span>
                 </div>
                 <button
-                  onClick={() => setShowEdgePanel(false)}
+                  onClick={() => {
+                    setShowEdgePanel(false);
+                    setActiveEdgeQuery(null);
+                  }}
                   className="p-1 hover:bg-slate-200 rounded text-slate-400"
                 >
                   <X size={16} />
@@ -1511,6 +1748,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
                 <button
                   onClick={() => {
                     setPathsResult(null);
+                    setActivePathQuery(null);
                     resetEdgeHighlights();
                     resetNodeHighlights();
                   }}
@@ -1573,18 +1811,108 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
                   )}
                 </div>
               </div>
-              <div className="p-4">
-                <div className="prose prose-sm max-w-none text-[13px] text-slate-700">
-                  <ReactMarkdown>{dSepResult.explanation}</ReactMarkdown>
+              <div className="p-4 space-y-4 max-h-[420px] overflow-y-auto">
+                <div
+                  className={`rounded-xl border p-3 ${
+                    dSepResult.d_separated
+                      ? "bg-emerald-50 border-emerald-100"
+                      : "bg-rose-50 border-rose-100"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`mt-0.5 rounded-full p-1.5 ${
+                        dSepResult.d_separated
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-rose-100 text-rose-700"
+                      }`}
+                    >
+                      {dSepResult.d_separated ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                    </div>
+                    <div>
+                      <div className={`text-sm font-bold ${dSepResult.d_separated ? "text-emerald-800" : "text-rose-800"}`}>
+                        {dSepResult.d_separated
+                          ? `${nodeLabels[dSepNodeA!] || dSepNodeA} and ${nodeLabels[dSepNodeB!] || dSepNodeB} are d-separated`
+                          : `${nodeLabels[dSepNodeA!] || dSepNodeA} and ${nodeLabels[dSepNodeB!] || dSepNodeB} are connected by active path(s)`}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Given {conditioningSet.length > 0 ? "the selected conditioning set" : "no conditioning variables"}.
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Active paths</h4>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                      {dSepResult.active_paths.length}
+                    </span>
+                  </div>
+                  {dSepResult.active_paths.length === 0 ? (
+                    <div className="rounded-xl border border-emerald-100 bg-white p-3 text-sm text-slate-600">
+                      No active paths remain after conditioning, so the variables are independent in this DAG.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {dSepResult.active_paths.map((path, pathIndex) => (
+                        <div key={`${path.join("-")}-${pathIndex}`} className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-700">
+                              Open path {pathIndex + 1}
+                            </span>
+                            <span className="text-[11px] text-slate-400">{path.length} nodes</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {path.map((nodeId, nodeIndex) => (
+                              <span key={`${nodeId}-${nodeIndex}`} className="flex items-center gap-1.5">
+                                <span
+                                  className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
+                                    conditioningSet.includes(nodeId)
+                                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                                      : nodeId === dSepNodeA
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : nodeId === dSepNodeB
+                                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-700"
+                                  }`}
+                                >
+                                  {nodeLabels[nodeId] || nodeId}
+                                </span>
+                                {nodeIndex < path.length - 1 && <span className="text-slate-300">→</span>}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {conditioningSet.length > 0 && (
-                  <div className="mt-3 text-xs text-slate-500">
-                    <span className="font-medium">Conditioning on:</span>{" "}
-                    {conditioningSet.map((n) => nodeLabels[n] || n).join(", ")}
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Conditioning on</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {conditioningSet.map((n) => (
+                        <span key={n} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                          {nodeLabels[n] || n}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <p className="mt-2 text-[11px] text-slate-400">
-                  Click other nodes to add/remove them from the conditioning set.
+
+                <details className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Explanation
+                  </summary>
+                  <div className="prose prose-sm mt-2 max-w-none text-[13px] text-slate-700">
+                    <ReactMarkdown>{dSepResult.explanation}</ReactMarkdown>
+                  </div>
+                </details>
+
+                <p className="text-[11px] text-slate-400">
+                  Click other nodes to add/remove them from the conditioning set. Active paths are highlighted on the graph.
                 </p>
               </div>
             </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart2, Trash2, Plus, HelpCircle, Share2Icon, MousePointerClick } from "lucide-react";
+import { BarChart2, Trash2, Plus, Pencil, HelpCircle, Share2Icon, MousePointerClick } from "lucide-react";
 import { Hoverable } from "@/components/scm/widgets/Hoverable";
 import { sampleScmSchema, type SCMVariableResult } from "@/lib/api";
 import { edgesFromSchema } from "@/types";
@@ -10,18 +10,20 @@ import Histogram from "@/components/scm/plots/Histogram";
 import JointDistribution from "@/components/scm/plots/JointDist";
 import NewVariablePanel from "@/components/scm/widgets/newVar";
 import InterventionPanel from "@/components/scm/widgets/intervPopup";
+import ResizablePanels from "@/components/scm/widgets/ResizablePanels";
 import type { Intervention, SCMSchema, SCMVariable } from "@/types";
 import SCMDAGView from "./widgets/SCMDAGView";
 
 interface SCMObservationalTabProps {
   schema: SCMSchema;
-  onAddVariable: (v: SCMVariable) => void;
+  onAddVariable: (v: SCMVariable, childIds: string[]) => void;
+  onEditVariable: (v: SCMVariable, childIds: string[]) => void;
   onDeleteVariable: (id: string) => void;
   onInterventionCreated: (iv: Intervention) => void;
   onContextChange?: (ctx: any) => void;
 }
 
-export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVariable, onInterventionCreated, onContextChange }: SCMObservationalTabProps) {
+export default function SCMObservationalTab({ schema, onAddVariable, onEditVariable, onDeleteVariable, onInterventionCreated, onContextChange }: SCMObservationalTabProps) {
   const variables = schema.variables;
   const DEFAULT_SAMPLE_SIZE = 500;
 
@@ -32,8 +34,59 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
   const sampleCache = useRef<Map<string, Record<string, SCMVariableResult>>>(new Map());
   const [distTab, setDistTab] = useState<"Marginal" | "Joint">("Marginal");
   const [showNewVariable, setShowNewVariable] = useState(false);
+  const [editingVarId, setEditingVarId] = useState<string | null>(null);
   const [showIntervention, setShowIntervention] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [popupOffset, setPopupOffset] = useState({ x: 0, y: 0 });
+  const [isDraggingPopup, setIsDraggingPopup] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; startOffset: { x: number; y: number } } | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const dagContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+
+  const handleWindowPointerMove = (e: PointerEvent) => {
+    const drag = dragRef.current;
+    const popupEl = popupRef.current;
+    const containerEl = dagContainerRef.current;
+    if (!drag || !popupEl || !containerEl) return;
+
+    const popupW = popupEl.offsetWidth;
+    const popupH = popupEl.offsetHeight;
+    const cw = containerEl.clientWidth;
+    const ch = containerEl.clientHeight;
+    const bottomOffset = 32;
+
+    const maxX = (cw - popupW) / 2;
+    const minY = bottomOffset + popupH - ch;
+
+    setPopupOffset({
+      x: clamp(drag.startOffset.x + (e.clientX - drag.startX), -maxX, maxX),
+      y: clamp(drag.startOffset.y + (e.clientY - drag.startY), minY, bottomOffset),
+    });
+  };
+
+  const handleWindowPointerUp = () => {
+    dragRef.current = null;
+    setIsDraggingPopup(false);
+    window.removeEventListener("pointermove", handleWindowPointerMove);
+    window.removeEventListener("pointerup", handleWindowPointerUp);
+    window.removeEventListener("pointercancel", handleWindowPointerUp);
+  };
+
+  const handlePopupPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("input, select, button, textarea, a")) return;
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startOffset: popupOffset,
+    };
+    setIsDraggingPopup(true);
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp);
+    window.addEventListener("pointercancel", handleWindowPointerUp);
+  };
 
   useEffect(() => {
     const cacheKey = `${schema.id}:${sampleSize}`;
@@ -61,6 +114,17 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
 
   const selected = results?.[selectedVarId];
   const newVarRef = useRef<HTMLDivElement>(null);
+  const editVarRef = useRef<HTMLDivElement>(null);
+  const editingVar = variables.find((v) => v.id === editingVarId) ?? null;
+
+  useEffect(() => {
+    if (editingVarId) {
+      // timeout to ensure panel is loaded before scrolling down
+      setTimeout(() => {
+        editVarRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }, 50);
+    }
+  }, [editingVarId]);
 
   useEffect(() => {
     if (showNewVariable) {
@@ -82,7 +146,7 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
   }, [sampleSize, selectedVarId, distTab, results, onContextChange]);
 
  return (
-    <div className="grid h-full w-full min-h-0 grid-cols-[360px_1fr_360px] divide-x divide-slate-200">
+    <ResizablePanels>
       {/* SCM */}
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex h-[45px] flex-shrink-0 items-center gap-3 bg-[#ffffff] border-b border-slate-200 px-4">
@@ -107,12 +171,21 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
                     <span className="font-mono text-[14px] font-bold text-slate-800">{v.name}</span>
                   </div>
-                  <button
-                    onClick={() => setConfirmDeleteId(v.id)}
-                    className="text-rose-400 transition-colors hover:text-rose-600"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setEditingVarId(v.id)}
+                      className="text-slate-400 transition-colors hover:text-slate-600"
+                      title="Edit variable"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(v.id)}
+                      className="text-rose-400 transition-colors hover:text-rose-600"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
 
                   {confirmDeleteId === v.id && (
                     <div className="absolute inset-x-0 top-0 z-30 rounded-lg  bg-white p-3 shadow-lg">
@@ -135,10 +208,10 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
                 </div>
 
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[14px] text-slate-500">
+                    <span className="min-w-0 flex-1 font-mono text-[14px] text-slate-500">
                       ← {formatFunctionalForm(v, i, { variables } as SCMSchema)}
                     </span>
-                    <span className="whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
+                    <span className="flex-shrink-0 whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
                       <span className="font-semibold text-slate-500">{v.noise.name}</span> ~ {formatDistribution(v.noise.distribution)}
                     </span>
                   </div>
@@ -151,11 +224,30 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
             })}
           </div>
 
+          {editingVar && (
+            <div ref={editVarRef} className="mx-3 pt-3">
+              <div className="mb-3 border-t border-slate-200" />
+              <NewVariablePanel
+                key={editingVar.id}
+                existingVariables={variables.filter((v) => v.id !== editingVar.id)}
+                isFirstVariable={false}
+                initialVariable={editingVar}
+                mode="edit"
+                onCancel={() => setEditingVarId(null)}
+                onAdd={(updated, childIds) => {
+                  onEditVariable(updated, childIds);
+                  setEditingVarId(null);
+                }}
+              />
+            </div>
+          )}
+
           <div ref={newVarRef} className="mx-3 border-t border-slate-100 pt-3 pb-8">
             {!showNewVariable ? (
               <button
                 onClick={() => setShowNewVariable(true)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-400 bg-slate-50 py-2.5 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-500 hover:bg-slate-200"
+                disabled={!!editingVar}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-400 bg-slate-50 py-2.5 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus size={14} />
                 Add Variable
@@ -164,8 +256,8 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
               <NewVariablePanel
                 existingVariables={variables}
                 onCancel={() => setShowNewVariable(false)}
-                onAdd={(newVar) => {
-                  onAddVariable(newVar);
+                onAdd={(newVar, childIds) => {
+                  onAddVariable(newVar, childIds);
                   setShowNewVariable(false);
                 }}
               />
@@ -184,17 +276,28 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
 
         </div>
 
-        <div className="flex w-full flex-1 min-h-0 items-center justify-center overflow-hidden">
+        <div ref={dagContainerRef} className="relative flex w-full flex-1 min-h-0 items-center justify-center overflow-hidden">
           <SCMDAGView variables={variables} />
 
         {showIntervention && (
-          <div className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2">
+          <div
+            ref={popupRef}
+            className={`absolute bottom-8 left-1/2 z-40 touch-none ${
+              isDraggingPopup ? "cursor-grabbing select-none" : "cursor-grab"
+            }`}
+            style={{ transform: `translate(-50%, 0) translate(${popupOffset.x}px, ${popupOffset.y}px)` }}
+            onPointerDown={handlePopupPointerDown}
+          >
           <InterventionPanel
               variables={variables}
-              onCancel={() => setShowIntervention(false)}
+              onCancel={() => {
+                setShowIntervention(false);
+                setPopupOffset({ x: 0, y: 0 });
+              }}
               onRun={(iv) => {
                 onInterventionCreated(iv);
                 setShowIntervention(false);
+                setPopupOffset({ x: 0, y: 0 });
               }}
             />
           </div>
@@ -325,6 +428,6 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
           )}
         </div>
       </div>
-    </div>
+    </ResizablePanels>
   );
 }

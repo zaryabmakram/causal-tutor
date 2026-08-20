@@ -78,14 +78,14 @@ export default function EditQueryPanel({
       <div className="flex flex-shrink-0 gap-2">
         <button
           onClick={onCancel}
-          className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-[12px] font-semibold text-slate-500 transition-colors hover:bg-slate-50"
+          className="flex items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-[12px] font-semibold text-slate-500 transition-colors hover:bg-slate-50"
         >
           <ChevronLeft size={13} /> Cancel
         </button>
         <button
           onClick={handleConfirm}
           disabled={!newValue.trim() || isNaN(parseFloat(newValue))}
-          className="rounded-md border px-3 py-1 text-[12px] font-semibold bg-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#fff8ee]"
+          className="flex items-center justify-center rounded-md border px-3 py-1 text-[12px] font-semibold bg-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#fff8ee]"
           style={{ borderColor: CF_BORDER_FONT_COLOR, color: CF_BORDER_FONT_COLOR }}
         >
           Confirm

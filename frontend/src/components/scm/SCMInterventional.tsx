@@ -9,6 +9,7 @@ import ComparisonHistogram from "@/components/scm/plots/OverlayedHistogram";
 import type { SCMSchema, Intervention } from "@/types";
 import JointDistribution from "./plots/JointDist";
 import SCMDAGView from "./widgets/SCMDAGView";
+import ResizablePanels from "./widgets/ResizablePanels";
 
 interface SCMInterventionalTabProps {
   schema: SCMSchema;
@@ -56,7 +57,7 @@ export default function SCMInterventionalTab({ schema, intervention }: SCMInterv
     : "";
 
   return (
-    <div className="grid h-full w-full min-h-0 grid-cols-[360px_1fr_360px] divide-x divide-slate-200">
+    <ResizablePanels>
       {/* SCM */}
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex h-[45px] flex-shrink-0 items-center gap-3 bg-white border-b border-slate-200 px-4">
@@ -112,10 +113,10 @@ export default function SCMInterventionalTab({ schema, intervention }: SCMInterv
                   </div>
 
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className={isHardTarget ? "font-mono text-[14px] text-slate-400 line-through" : "font-mono text-[14px] text-slate-500"}>
+                    <span className={`min-w-0 flex-1 font-mono text-[14px] ${isHardTarget ? "text-slate-400 line-through" : "text-slate-500"}`}>
                       ← {functionalForm}
                     </span>
-                    <span className={`whitespace-nowrap rounded-md border px-2 py-1 text-[11px] ${
+                    <span className={`flex-shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] ${
                       isHardTarget
                         ? "border-slate-200 bg-slate-50 text-slate-400 line-through"
                         : "border-slate-200 bg-slate-50 text-slate-700"
@@ -285,6 +286,6 @@ export default function SCMInterventionalTab({ schema, intervention }: SCMInterv
           )}
         </div>
       </div>
-    </div>
+    </ResizablePanels>
   );
 }

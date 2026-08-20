@@ -357,13 +357,48 @@ def causal_analysis(
         if not is_blocked:
             active_paths.append(path)
 
+    path_type_rank = {"directed": 0, "backdoor": 1, "other": 2}
+    paths_info.sort(key=lambda info: (path_type_rank.get(info.path_type, 99), info.is_blocked))
+
+    directed_path_infos = [info for info in paths_info if info.path_type == "directed"]
+    open_directed_paths = [info.path for info in directed_path_infos if not info.is_blocked]
+    causal_path_exists = len(directed_path_infos) > 0
+
     # 3. d-separation verdict (use networkx if possible)
     try:
         d_sep = bool(nx.d_separated(G, {treatment}, {outcome}, cond_set))
     except Exception:
         d_sep = len(active_paths) == 0
 
-    # 4. Backdoor criterion
+    # 4. Role / query sanity checks. These are separate from the backdoor
+    # criterion: before discussing adjustment, the tool should tell the learner
+    # whether there is a directed causal pathway to estimate and whether Z blocks
+    # that pathway.
+    label_T = labels.get(treatment, treatment)
+    label_Y = labels.get(outcome, outcome)
+    cond_str = "{" + ", ".join(labels.get(c, c) for c in conditioning_set) + "}" if conditioning_set else "{} (empty)"
+    role_issues: List[str] = []
+
+    if not causal_path_exists:
+        role_issues.append(
+            f"There is no directed causal path from '{label_T}' to '{label_Y}' in this DAG, so this role selection does not represent a causal effect of T on Y."
+        )
+    elif not open_directed_paths:
+        role_issues.append(
+            f"All directed causal paths from '{label_T}' to '{label_Y}' are blocked by Z = {cond_str}. Adjustment variables should block non-causal backdoor paths, not the causal pathway itself."
+        )
+
+    for info in paths_info:
+        if info.path_type != "directed" and not info.is_blocked and info.collider_nodes:
+            opened = [n for n in info.collider_nodes if n in cond_set]
+            if opened:
+                opened_labels = ", ".join(labels.get(n, n) for n in opened)
+                path_str = " → ".join(labels.get(n, n) for n in info.path)
+                role_issues.append(
+                    f"Conditioning on collider(s) {opened_labels} opens the non-causal path {path_str}."
+                )
+
+    # 5. Backdoor criterion
     backdoor_issues: List[str] = []
     desc_T = _descendants(G, treatment)
     descendant_violations = cond_set.intersection(desc_T)
@@ -387,17 +422,19 @@ def causal_analysis(
 
     backdoor_satisfied = len(backdoor_issues) == 0
 
-    # 5. Minimal adjustment set suggestion (only if not satisfied)
+    # 6. Minimal adjustment set suggestion (only if not satisfied)
     minimal_set: Optional[List[str]] = None
     if not backdoor_satisfied:
         minimal_set = _find_minimal_adjustment_set(G, treatment, outcome, latent)
 
-    # 6. Explanation
-    label_T = labels.get(treatment, treatment)
-    label_Y = labels.get(outcome, outcome)
-    cond_str = "{" + ", ".join(labels.get(c, c) for c in conditioning_set) + "}" if conditioning_set else "{} (empty)"
-
-    if backdoor_satisfied:
+    # 7. Explanation
+    if role_issues:
+        explanation = (
+            f"**Check the role selection / adjustment set first.** For the query {label_T} → {label_Y} "
+            f"with Z = {cond_str}, the main issue is not the backdoor criterion yet: "
+            f"{' '.join(role_issues)}"
+        )
+    elif backdoor_satisfied:
         if d_sep:
             explanation = (
                 f"**Causal effect identifiable.** With conditioning set Z = {cond_str}, "
@@ -429,6 +466,9 @@ def causal_analysis(
         paths=paths_info,
         d_separated=d_sep,
         active_paths=active_paths,
+        causal_path_exists=causal_path_exists,
+        open_directed_paths=open_directed_paths,
+        role_issues=role_issues,
         backdoor_satisfied=backdoor_satisfied,
         backdoor_issues=backdoor_issues,
         minimal_adjustment_set=minimal_set,

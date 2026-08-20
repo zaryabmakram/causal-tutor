@@ -89,6 +89,9 @@ export interface CausalAnalysisResult {
   paths: AnalysisPathInfo[];
   d_separated: boolean;
   active_paths: string[][];
+  causal_path_exists: boolean;
+  open_directed_paths: string[][];
+  role_issues: string[];
   backdoor_satisfied: boolean;
   backdoor_issues: string[];
   minimal_adjustment_set: string[] | null;

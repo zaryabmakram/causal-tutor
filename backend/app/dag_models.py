@@ -103,6 +103,9 @@ class CausalAnalysisResponse(BaseModel):
     paths: List[AnalysisPathInfo]
     d_separated: bool = Field(description="Are T and Y d-separated given Z?")
     active_paths: List[List[str]] = Field(default_factory=list)
+    causal_path_exists: bool = Field(default=True, description="Is there at least one directed path from T to Y?")
+    open_directed_paths: List[List[str]] = Field(default_factory=list)
+    role_issues: List[str] = Field(default_factory=list)
     backdoor_satisfied: bool
     backdoor_issues: List[str] = Field(default_factory=list)
     minimal_adjustment_set: Optional[List[str]] = None

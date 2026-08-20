@@ -89,6 +89,9 @@ export interface CausalAnalysisResult {
   paths: AnalysisPathInfo[];
   d_separated: boolean;
   active_paths: string[][];
+  causal_path_exists: boolean;
+  open_directed_paths: string[][];
+  role_issues: string[];
   backdoor_satisfied: boolean;
   backdoor_issues: string[];
   minimal_adjustment_set: string[] | null;
@@ -230,3 +233,48 @@ export interface EstimateResponse {
   plot_type: string;
   plot_data: Record<string, unknown>;
 }
+
+// ── SCM Playground Types ────────────────────────────────────────────────
+
+export type NoiseType = "normal" | "uniform" | "bernoulli" | "exponential";
+
+export interface NoiseDistribution {
+  type: NoiseType;
+  params: Record<string, number>;
+}
+
+export interface SCMNoise {
+  key: string;
+  name: string;
+  distribution: NoiseDistribution;
+}
+
+export interface SCMVariable {
+  id: string;
+  name: string;
+  dependencies: string[];
+  coefficients: Record<string, number>;
+  intercept: number;
+  noise: SCMNoise;
+  noise_coefficient: number;
+}
+
+export interface SCMSchema {
+  id: string;
+  name: string;
+  variables: SCMVariable[];
+}
+
+export type SCMEdge = [string, string];
+
+export function edgesFromSchema(schema: SCMSchema): SCMEdge[] {
+  const edges: SCMEdge[] = [];
+  schema.variables.forEach((v) => {
+    v.dependencies.forEach((depId) => edges.push([depId, v.id]));
+  });
+  return edges;
+}
+
+export type Intervention =
+  | { type: "hard"; target_id: string; value: number }
+  | { type: "soft"; target_id: string; coefficients: Record<string, number>; noise_coefficient: number };

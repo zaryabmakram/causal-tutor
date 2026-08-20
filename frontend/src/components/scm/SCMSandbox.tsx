@@ -19,13 +19,43 @@ export default function SCMSandbox({ onCreateSchema, onContextChange }: SCMSandb
   const [editingId, setEditingId] = useState<string | null>(null);
 
 
-  const handleAdd = (v: SCMVariable) => {
-    setVariables((prev) => [...prev, v]);
+  const handleAdd = (v: SCMVariable, childIds: string[]) => {
+    setVariables((prev) =>
+      prev
+        .map((p) =>
+          childIds.includes(p.id)
+            ? { ...p, dependencies: [...p.dependencies, v.id], coefficients: { ...p.coefficients, [v.id]: 1 } }
+            : p
+        )
+        .concat(v)
+    );
     setPanelMode("none");
   };
 
-  const handleEdit = (updated: SCMVariable) => {
-    setVariables((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+  const handleEdit = (updated: SCMVariable, childIds: string[]) => {
+    // handles child state changes when editing and updates dependencies and coefficients (default coefficient = 1)
+    setVariables((prev) => {
+      const prevVar = prev.find((v) => v.id === updated.id);
+      const prevChildren = prevVar
+        ? prev.filter((v) => v.dependencies.includes(prevVar.id)).map((v) => v.id)
+        : [];
+      return prev.map((v) => {
+        if (v.id === updated.id) return updated;
+        const isChildNow = childIds.includes(v.id);
+        const wasChild = prevChildren.includes(v.id);
+        if (isChildNow === wasChild) return v;
+        if (isChildNow) {
+          return { ...v, dependencies: [...v.dependencies, updated.id], coefficients: { ...v.coefficients, [updated.id]: 1 } };
+        }
+        return {
+          ...v,
+          dependencies: v.dependencies.filter((d) => d !== updated.id),
+          coefficients: Object.fromEntries(
+            Object.entries(v.coefficients).filter(([k]) => k !== updated.id)
+          ),
+        };
+      });
+    });
     setPanelMode("none");
     setEditingId(null);
   };

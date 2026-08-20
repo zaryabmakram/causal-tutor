@@ -25,13 +25,16 @@ interface SCMCounterfactualResultProps {
 }
 
 // handles latex code for query
+const ESCAPE_LATEX_TEXT = /([\\%#&$_{}~^])/g;
+const escapeLatexText = (name: string) => name.replace(ESCAPE_LATEX_TEXT, "\\$1");
+
 const toLatexSubscript = (name: string) => {
   const SUBSCRIPT_MAP: Record<string, string> = {
     "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
     "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
   };
   const match = name.match(/^([A-Za-z]+)([₀₁₂₃₄₅₆₇₈₉]+)$/);
-  if (!match) return `\\text{${name}}`;
+  if (!match) return `\\text{${escapeLatexText(name)}}`;
   const [, base, subUnicode] = match;
   const subDigits = subUnicode.split("").map((c) => SUBSCRIPT_MAP[c] ?? c).join("");
   return `${base}_{${subDigits}}`;
@@ -76,7 +79,7 @@ export default function SCMCounterfactualResult({
   const cfDistResult = intervenedResults?.[queryId];
 
   const conditions = variables
-  .map((v) => `${toLatexSubscript(v.name)}=${observedValues[v.id]?.toFixed(1)}`)
+  .map((v) => `${toLatexSubscript(v.name)}=${observedValues[v.id]?.toFixed(1) ?? "?"}`)
   .join(", \\; ");
 
   const latexQuery = `\\mathbb{E}[${toLatexSubscript(queryVar?.name ?? "")}(${toLatexSubscript(interveneVar?.name ?? "")}=${interveneValue.toFixed(1)}) \\mid ${conditions}]`;

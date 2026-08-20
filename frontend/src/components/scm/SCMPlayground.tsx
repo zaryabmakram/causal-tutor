@@ -232,8 +232,63 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
     setHasIntervention(false);
   };
 
-  const addVariable = (newVar: SCMVariable) => {
-    setSchema((prev) => (prev ? { ...prev, variables: [...prev.variables, newVar] } : prev));
+  const addVariable = (newVar: SCMVariable, childIds: string[]) => {
+    setSchema((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        variables: [
+          ...prev.variables.map((v) =>
+            childIds.includes(v.id)
+              ? {
+                  ...v,
+                  dependencies: [...v.dependencies, newVar.id],
+                  coefficients: { ...v.coefficients, [newVar.id]: 1 },
+                }
+              : v
+          ),
+          newVar,
+        ],
+      };
+    });
+    clearIntervention();
+    setCfSession(null);
+  };
+
+  const updateVariable = (updated: SCMVariable, childIds: string[]) => {
+    setSchema((prev) => {
+      if (!prev) return prev;
+      const prevVar = prev.variables.find((v) => v.id === updated.id);
+      const prevChildren = prevVar
+        ? prev.variables.filter((v) => v.dependencies.includes(prevVar.id)).map((v) => v.id)
+        : [];
+
+      return {
+        ...prev,
+        variables: prev.variables.map((v) => {
+          if (v.id === updated.id) return updated;
+
+          const isChildNow = childIds.includes(v.id);
+          const wasChild = prevChildren.includes(v.id);
+          if (isChildNow === wasChild) return v;
+
+          if (isChildNow) {
+            return {
+              ...v,
+              dependencies: [...v.dependencies, updated.id],
+              coefficients: { ...v.coefficients, [updated.id]: 1 },
+            };
+          }
+          return {
+            ...v,
+            dependencies: v.dependencies.filter((d) => d !== updated.id),
+            coefficients: Object.fromEntries(
+              Object.entries(v.coefficients).filter(([k]) => k !== updated.id)
+            ),
+          };
+        }),
+      };
+    });
     clearIntervention();
     setCfSession(null);
   };
@@ -470,6 +525,7 @@ export default function SCMPlayground({ compactToolbar = false, onContextChange 
                     key={`${schema.id}-${resetToken}`}
                     schema={schema}
                     onAddVariable={addVariable}
+                    onEditVariable={updateVariable}
                     onDeleteVariable={deleteVariable}
                     onInterventionCreated={applyIntervention}
                     onContextChange={setObsContext}

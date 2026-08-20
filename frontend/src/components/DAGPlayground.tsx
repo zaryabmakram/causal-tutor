@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type CSSProperties } from "react";
 import {
   ReactFlow,
   Controls,
@@ -184,7 +184,10 @@ function DAGNode({ id, data, selected }: NodeProps) {
 }
 
 const nodeTypes: NodeTypes = { dagNode: DAGNode };
-type DeletableEdgeData = { onDelete?: (edgeId: string) => void };
+type DeletableEdgeData = {
+  onDelete?: (edgeId: string) => void;
+  pathFlow?: { color: string; reverse?: boolean };
+};
 type NodePair = { source: string; target: string };
 
 function DeletableEdge({
@@ -209,10 +212,20 @@ function DeletableEdge({
     targetPosition,
   });
   const edgeData = data as DeletableEdgeData | undefined;
+  const flow = edgeData?.pathFlow;
+  const flowStyle: CSSProperties | undefined = flow
+    ? {
+        ...style,
+        stroke: flow.color,
+        strokeDasharray: "7 7",
+        strokeLinecap: "round",
+        animation: `${flow.reverse ? "dag-path-flow-reverse" : "dag-path-flow-forward"} 0.9s linear infinite`,
+      }
+    : style;
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={flowStyle} />
       {selected && (
         <EdgeLabelRenderer>
           <button
@@ -548,6 +561,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
       setEdges((eds) =>
         eds.map((e) => ({
           ...e,
+          data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined },
           animated: false,
           style: { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
         }))
@@ -561,6 +575,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     const blockedSet = new Set<string>();
     const directedOpenSet = new Set<string>();
     const backdoorOpenSet = new Set<string>();
+    const openPathFlows = new Map<string, { color: string; reverse?: boolean }>();
 
     causalResult.paths.forEach((p) => {
       for (let i = 0; i < p.path.length - 1; i++) {
@@ -574,26 +589,32 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
         } else if (p.path_type === "directed") {
           directedOpenSet.add(eid1);
           directedOpenSet.add(eid2);
+          if (!openPathFlows.has(eid1)) openPathFlows.set(eid1, { color: "#10b981", reverse: false });
+          if (!openPathFlows.has(eid2)) openPathFlows.set(eid2, { color: "#10b981", reverse: true });
         } else {
           backdoorOpenSet.add(eid1);
           backdoorOpenSet.add(eid2);
+          openPathFlows.set(eid1, { color: "#f43f5e", reverse: false });
+          openPathFlows.set(eid2, { color: "#f43f5e", reverse: true });
         }
       }
     });
 
     setEdges((eds) =>
       eds.map((e) => {
+        const flow = openPathFlows.get(e.id);
+        const data = { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow };
         // Open paths take precedence over blocked classification when an edge appears in both
         if (backdoorOpenSet.has(e.id)) {
-          return { ...e, animated: true, style: { stroke: "#f43f5e", strokeWidth: 2.5 } };
+          return { ...e, data, animated: false, style: { stroke: "#f43f5e", strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined } };
         }
         if (directedOpenSet.has(e.id)) {
-          return { ...e, animated: false, style: { stroke: "#10b981", strokeWidth: 2.5 } };
+          return { ...e, data, animated: false, style: { stroke: "#10b981", strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined } };
         }
         if (blockedSet.has(e.id)) {
-          return { ...e, animated: false, style: { stroke: "#cbd5e1", strokeWidth: 1.5, strokeDasharray: "5 5", opacity: 0.6 } };
+          return { ...e, data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined }, animated: false, style: { stroke: "#cbd5e1", strokeWidth: 1.5, strokeDasharray: "5 5", opacity: 0.6 } };
         }
-        return e;
+        return { ...e, data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined } };
       })
     );
   }, [causalResult, setEdges]);
@@ -642,30 +663,29 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
   const applyPathHighlights = useCallback(
     (result: PathsResponse) => {
-      const edgesOnPaths = new Set<string>();
-      const edgeColors: Record<string, string> = {};
+      const edgeFlows = new Map<string, { color: string; reverse?: boolean }>();
       result.all_paths.forEach((p: PathInfo) => {
         for (let i = 0; i < p.path.length - 1; i++) {
           const a = p.path[i];
           const b = p.path[i + 1];
-          const eid1 = `e-${a}-${b}`;
-          const eid2 = `e-${b}-${a}`;
-          edgesOnPaths.add(eid1);
-          edgesOnPaths.add(eid2);
           const color = p.path_type === "directed" ? "#10b981" : p.path_type === "backdoor" ? "#f43f5e" : "#6366f1";
-          edgeColors[eid1] = color;
-          edgeColors[eid2] = color;
+          edgeFlows.set(`e-${a}-${b}`, { color, reverse: false });
+          edgeFlows.set(`e-${b}-${a}`, { color, reverse: true });
         }
       });
 
       setEdges((eds) =>
-        eds.map((e) => ({
-          ...e,
-          animated: edgesOnPaths.has(e.id),
-          style: edgesOnPaths.has(e.id)
-            ? { stroke: edgeColors[e.id] || "#6366f1", strokeWidth: 3 }
-            : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
-        }))
+        eds.map((e) => {
+          const flow = edgeFlows.get(e.id);
+          return {
+            ...e,
+            data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow },
+            animated: false,
+            style: flow
+              ? { ...e.style, stroke: flow.color, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined }
+              : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
+          };
+        })
       );
     },
     [setEdges]
@@ -673,22 +693,29 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
   const applyDSeparationHighlights = useCallback(
     (result: DSeparationResult) => {
-      const activeEdges = new Set<string>();
+      const activeEdgeFlows = new Map<string, { color: string; reverse?: boolean }>();
       result.active_paths.forEach((path) => {
         for (let i = 0; i < path.length - 1; i++) {
-          activeEdges.add(`e-${path[i]}-${path[i + 1]}`);
-          activeEdges.add(`e-${path[i + 1]}-${path[i]}`);
+          const from = path[i];
+          const to = path[i + 1];
+          activeEdgeFlows.set(`e-${from}-${to}`, { color: "#f43f5e", reverse: false });
+          activeEdgeFlows.set(`e-${to}-${from}`, { color: "#f43f5e", reverse: true });
         }
       });
 
       setEdges((eds) =>
-        eds.map((e) => ({
-          ...e,
-          animated: activeEdges.has(e.id),
-          style: activeEdges.has(e.id)
-            ? { stroke: "#f43f5e", strokeWidth: 3 }
-            : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
-        }))
+        eds.map((e) => {
+          const flow = activeEdgeFlows.get(e.id);
+          const data = { ...(e.data as DeletableEdgeData | undefined), pathFlow: flow };
+          return {
+            ...e,
+            data,
+            animated: false,
+            style: flow
+              ? { ...e.style, stroke: "#f43f5e", strokeWidth: undefined }
+              : { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
+          };
+        })
       );
     },
     [setEdges]
@@ -975,6 +1002,7 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
     setEdges((eds) =>
       eds.map((e) => ({
         ...e,
+        data: { ...(e.data as DeletableEdgeData | undefined), pathFlow: undefined },
         animated: false,
         style: { ...e.style, stroke: undefined, strokeWidth: undefined, strokeDasharray: undefined, opacity: undefined },
       }))
@@ -1373,6 +1401,25 @@ export default function DAGPlayground({ onContextChange }: DAGPlaygroundProps = 
 
   return (
     <div className="flex h-full w-full bg-white overflow-hidden">
+      <style jsx global>{`
+        @keyframes dag-path-flow-forward {
+          from {
+            stroke-dashoffset: 0;
+          }
+          to {
+            stroke-dashoffset: -14;
+          }
+        }
+
+        @keyframes dag-path-flow-reverse {
+          from {
+            stroke-dashoffset: 0;
+          }
+          to {
+            stroke-dashoffset: 14;
+          }
+        }
+      `}</style>
       {/* Main Area */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header / Toolbar */}

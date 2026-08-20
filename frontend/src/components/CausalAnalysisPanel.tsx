@@ -168,12 +168,18 @@ export default function CausalAnalysisPanel(props: CausalAnalysisPanelProps) {
 
   if (!isOpen) return null;
 
+  const roleIssues = result?.role_issues ?? [];
+
   // Verdict styling
   let verdictClass = "bg-slate-50 border-slate-200 text-slate-700";
   let verdictIcon: JSX.Element = <Target size={16} />;
   let verdictLabel = "Run analysis";
   if (result) {
-    if (result.backdoor_satisfied) {
+    if (roleIssues.length > 0) {
+      verdictClass = "bg-amber-50 border-amber-200 text-amber-900";
+      verdictIcon = <AlertTriangle size={16} className="text-amber-600" />;
+      verdictLabel = "Check causal pathway / adjustment set";
+    } else if (result.backdoor_satisfied) {
       verdictClass = "bg-emerald-50 border-emerald-200 text-emerald-800";
       verdictIcon = <CheckCircle2 size={16} className="text-emerald-600" />;
       verdictLabel = result.d_separated
@@ -357,6 +363,23 @@ export default function CausalAnalysisPanel(props: CausalAnalysisPanelProps) {
                 <ReactMarkdown>{result.explanation}</ReactMarkdown>
               </div>
             </div>
+
+            {/* Role / pathway issues */}
+            {roleIssues.length > 0 && (
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                <div className="flex items-center gap-1.5 text-amber-700 font-bold text-[11px] uppercase mb-1.5">
+                  <AlertTriangle size={12} /> Check before backdoor adjustment
+                </div>
+                <ul className="space-y-1">
+                  {roleIssues.map((issue, i) => (
+                    <li key={i} className="text-[12px] text-amber-950 leading-relaxed flex items-start gap-1.5">
+                      <span className="text-amber-500 mt-0.5">•</span>
+                      <span>{issue}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Issues */}
             {result.backdoor_issues.length > 0 && (

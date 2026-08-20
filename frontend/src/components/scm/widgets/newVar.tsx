@@ -10,11 +10,57 @@ interface NewVariablePanelProps {
   initialVariable?: SCMVariable;
   mode?: "add" | "edit";
   onCancel: () => void;
-  onAdd: (variable: SCMVariable) => void;
+  onAdd: (variable: SCMVariable, childIds: string[]) => void;
 }
 
 const SUBSCRIPTS = "₀₁₂₃₄₅₆₇₈₉";
 const toSubscript = (n: number) => String(n).split("").map((d) => SUBSCRIPTS[+d]).join("");
+
+// Simulates the resulting graph (existing variables + this variable + its
+// children edges) and checks it is still acyclic via Kahn's algorithm.
+function isAcyclicWithChildren(
+  variable: SCMVariable,
+  existingVariables: SCMVariable[],
+  childIds: string[]
+): boolean {
+  const ids = [...existingVariables.map((v) => v.id), variable.id];
+  const graph = new Map<string, string[]>();
+  ids.forEach((id) => graph.set(id, []));
+
+  existingVariables.forEach((v) => {
+    if (childIds.includes(v.id)) {
+      graph.get(variable.id)!.push(v.id);
+    }
+    v.dependencies.forEach((dep) => {
+      // In edit mode existingVariables still carry the old edge to the edited
+      // variable; that edge is fully represented by the childIds selection.
+      if (dep === variable.id) return;
+      if (graph.has(dep)) graph.get(dep)!.push(v.id);
+    });
+  });
+  variable.dependencies.forEach((dep) => {
+    if (graph.has(dep)) graph.get(dep)!.push(variable.id);
+  });
+
+  const indegree = new Map<string, number>();
+  ids.forEach((id) => indegree.set(id, 0));
+  graph.forEach((targets) => {
+    targets.forEach((t) => indegree.set(t, (indegree.get(t) ?? 0) + 1));
+  });
+
+  const queue = ids.filter((id) => (indegree.get(id) ?? 0) === 0);
+  let visited = 0;
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    visited += 1;
+    (graph.get(id) ?? []).forEach((t) => {
+      const next = (indegree.get(t) ?? 0) - 1;
+      indegree.set(t, next);
+      if (next === 0) queue.push(t);
+    });
+  }
+  return visited === ids.length;
+}
 
 export default function NewVariablePanel({
   existingVariables, isFirstVariable = false, initialVariable, mode = "add", onCancel, onAdd,
@@ -23,6 +69,11 @@ export default function NewVariablePanel({
 
   const [name, setName] = useState(initialVariable?.name ?? "");
   const [selectedParents, setSelectedParents] = useState<string[]>(initialVariable?.dependencies ?? []);
+  const [selectedChildren, setSelectedChildren] = useState<string[]>(
+    initialVariable
+      ? existingVariables.filter((v) => v.dependencies.includes(initialVariable.id)).map((v) => v.id)
+      : []
+  );
   const [distribution, setDistribution] = useState<"Normal" | "Uniform" | "Bernoulli" | "Exponential">(
     initialVariable ? (initialVariable.noise.distribution.type.charAt(0).toUpperCase() + initialVariable.noise.distribution.type.slice(1)) as any : "Normal"
   );
@@ -43,12 +94,27 @@ export default function NewVariablePanel({
   const [zeroCoeffWarning, setZeroCoeffWarning] = useState<string | null>(null);
   const [pendingVariable, setPendingVariable] = useState<SCMVariable | null>(null);
 
-  const newId = isEdit ? initialVariable!.id : `x${existingVariables.length + 1}`;
-  const noiseKey = isEdit ? initialVariable!.noise.key : `n${existingVariables.length + 1}`;
-  const noiseName = isEdit ? initialVariable!.noise.name : `N${toSubscript(existingVariables.length + 1)}`;
+  const nextN = (() => {
+    const used = new Set(
+      existingVariables.map((v) => {
+        const m = v.id.match(/^x(\d+)$/);
+        return m ? parseInt(m[1], 10) : NaN;
+      }).filter((n) => !isNaN(n))
+    );
+    let n = existingVariables.length + 1;
+    while (used.has(n)) n++;
+    return n;
+  })();
+  const newId = isEdit ? initialVariable!.id : `x${nextN}`;
+  const noiseKey = isEdit ? initialVariable!.noise.key : `n${nextN}`;
+  const noiseName = isEdit ? initialVariable!.noise.name : `N${toSubscript(nextN)}`;
 
   const toggleParent = (id: string) => {
     setSelectedParents((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  };
+
+  const toggleChild = (id: string) => {
+    setSelectedChildren((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
   };
 
   const buildDistribution = (): NoiseDistribution => {
@@ -70,7 +136,7 @@ export default function NewVariablePanel({
     setZeroCoeffWarning(null);
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [name, selectedParents, coeffs, noiseCoeff, distribution, mean, std, min, max, p, lam]);
+}, [name, selectedParents, selectedChildren, coeffs, noiseCoeff, distribution, mean, std, min, max, p, lam]);
 
   const handleSubmit = () => {
     const trimmedName = name.trim()
@@ -126,6 +192,11 @@ export default function NewVariablePanel({
       noise_coefficient: parseFloat(noiseCoeff),
     };
 
+    if (!isAcyclicWithChildren(variable, existingVariables, selectedChildren)) {
+      setError("This change would create a cycle. Remove some parents or children to keep the model acyclic.");
+      return;
+    }
+
     // handles case where user inputs 0 as coeff -> no causal relation -> remove as dependency
     if (zeroParents.length > 0) {
       const zeroNames = zeroParents.map((pid) => existingVariables.find((v) => v.id === pid)?.name).join(", ");
@@ -133,13 +204,19 @@ export default function NewVariablePanel({
       setPendingVariable(variable);
       return;
   }
-  onAdd(variable);
+  onAdd(variable, selectedChildren);
 
   };
 
   const handleConfirmPending = () => {
     if (!pendingVariable) return;
-    onAdd(pendingVariable);
+    if (!isAcyclicWithChildren(pendingVariable, existingVariables, selectedChildren)) {
+      setError("This change would create a cycle. Remove some parents or children to keep the model acyclic.");
+      setPendingVariable(null);
+      setZeroCoeffWarning(null);
+      return;
+    }
+    onAdd(pendingVariable, selectedChildren);
     setPendingVariable(null);
     setZeroCoeffWarning(null);
   };
@@ -211,7 +288,7 @@ export default function NewVariablePanel({
               className="flex-1 bg-transparent px-1 text-[13px] text-slate-600 focus:outline-none"
             >
               <option value="" disabled>Add parent...</option>
-              {existingVariables.filter((v) => !selectedParents.includes(v.id)).map((v) => (
+              {existingVariables.filter((v) => !selectedParents.includes(v.id) && !selectedChildren.includes(v.id)).map((v) => (
                 <option key={v.id} value={v.id}>{v.name}</option>
               ))}
             </select>
@@ -224,6 +301,43 @@ export default function NewVariablePanel({
         <div className="mb-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5">
           <p className="text-[11.5px] leading-snug text-slate-500">
             This is the first variable, so it has no dependencies. You can edit this later after you create new variables.
+          </p>
+        </div>
+      )}
+
+      {existingVariables.length > 0 && (
+        <div className="mb-4">
+          <div className="mb-1.5 text-[13px] font-bold text-slate-600">Children</div>
+          <div className="flex min-h-[38px] w-full flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5 focus-within:border-slate-400">
+            {selectedChildren.map((cid) => {
+              const child = existingVariables.find((v) => v.id === cid);
+              return (
+                <span
+                  key={cid}
+                  onClick={() => toggleChild(cid)}
+                  className="flex cursor-pointer items-center gap-1 rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[12px] font-semibold text-sky-700 transition-colors hover:bg-sky-100"
+                >
+                  <Check size={12} strokeWidth={3} /> {child?.name}
+                </span>
+              );
+            })}
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) toggleChild(e.target.value); }}
+              className="flex-1 bg-transparent px-1 text-[13px] text-slate-600 focus:outline-none"
+            >
+              <option value="" disabled>Add child...</option>
+              {existingVariables
+                .filter((v) => v.id !== newId)
+                .filter((v) => !selectedChildren.includes(v.id))
+                .filter((v) => !selectedParents.includes(v.id))
+                .map((v) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+            </select>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+            What does your variable directly affect? Selecting a child adds this variable to its equation as a parent.
           </p>
         </div>
       )}
@@ -333,7 +447,7 @@ export default function NewVariablePanel({
           onClick={pendingVariable ? handleConfirmPending : handleSubmit}
           className="flex-1 rounded-lg border border-slate-300 bg-white py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50"
         >
-          Add
+          {isEdit ? "Confirm Edit" : "Add"}
         </button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart2, Trash2, Plus, HelpCircle, Share2Icon, MousePointerClick } from "lucide-react";
+import { BarChart2, Trash2, Plus, Pencil, HelpCircle, Share2Icon, MousePointerClick } from "lucide-react";
 import { Hoverable } from "@/components/scm/widgets/Hoverable";
 import { sampleScmSchema, type SCMVariableResult } from "@/lib/api";
 import { edgesFromSchema } from "@/types";
@@ -16,13 +16,14 @@ import SCMDAGView from "./widgets/SCMDAGView";
 
 interface SCMObservationalTabProps {
   schema: SCMSchema;
-  onAddVariable: (v: SCMVariable) => void;
+  onAddVariable: (v: SCMVariable, childIds: string[]) => void;
+  onEditVariable: (v: SCMVariable, childIds: string[]) => void;
   onDeleteVariable: (id: string) => void;
   onInterventionCreated: (iv: Intervention) => void;
   onContextChange?: (ctx: any) => void;
 }
 
-export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVariable, onInterventionCreated, onContextChange }: SCMObservationalTabProps) {
+export default function SCMObservationalTab({ schema, onAddVariable, onEditVariable, onDeleteVariable, onInterventionCreated, onContextChange }: SCMObservationalTabProps) {
   const variables = schema.variables;
   const DEFAULT_SAMPLE_SIZE = 500;
 
@@ -33,6 +34,7 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
   const sampleCache = useRef<Map<string, Record<string, SCMVariableResult>>>(new Map());
   const [distTab, setDistTab] = useState<"Marginal" | "Joint">("Marginal");
   const [showNewVariable, setShowNewVariable] = useState(false);
+  const [editingVarId, setEditingVarId] = useState<string | null>(null);
   const [showIntervention, setShowIntervention] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [popupOffset, setPopupOffset] = useState({ x: 0, y: 0 });
@@ -112,6 +114,17 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
 
   const selected = results?.[selectedVarId];
   const newVarRef = useRef<HTMLDivElement>(null);
+  const editVarRef = useRef<HTMLDivElement>(null);
+  const editingVar = variables.find((v) => v.id === editingVarId) ?? null;
+
+  useEffect(() => {
+    if (editingVarId) {
+      // timeout to ensure panel is loaded before scrolling down
+      setTimeout(() => {
+        editVarRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }, 50);
+    }
+  }, [editingVarId]);
 
   useEffect(() => {
     if (showNewVariable) {
@@ -158,12 +171,21 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
                     <span className="font-mono text-[14px] font-bold text-slate-800">{v.name}</span>
                   </div>
-                  <button
-                    onClick={() => setConfirmDeleteId(v.id)}
-                    className="text-rose-400 transition-colors hover:text-rose-600"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setEditingVarId(v.id)}
+                      className="text-slate-400 transition-colors hover:text-slate-600"
+                      title="Edit variable"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(v.id)}
+                      className="text-rose-400 transition-colors hover:text-rose-600"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
 
                   {confirmDeleteId === v.id && (
                     <div className="absolute inset-x-0 top-0 z-30 rounded-lg  bg-white p-3 shadow-lg">
@@ -202,11 +224,30 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
             })}
           </div>
 
+          {editingVar && (
+            <div ref={editVarRef} className="mx-3 pt-3">
+              <div className="mb-3 border-t border-slate-200" />
+              <NewVariablePanel
+                key={editingVar.id}
+                existingVariables={variables.filter((v) => v.id !== editingVar.id)}
+                isFirstVariable={false}
+                initialVariable={editingVar}
+                mode="edit"
+                onCancel={() => setEditingVarId(null)}
+                onAdd={(updated, childIds) => {
+                  onEditVariable(updated, childIds);
+                  setEditingVarId(null);
+                }}
+              />
+            </div>
+          )}
+
           <div ref={newVarRef} className="mx-3 border-t border-slate-100 pt-3 pb-8">
             {!showNewVariable ? (
               <button
                 onClick={() => setShowNewVariable(true)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-400 bg-slate-50 py-2.5 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-500 hover:bg-slate-200"
+                disabled={!!editingVar}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-400 bg-slate-50 py-2.5 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus size={14} />
                 Add Variable
@@ -215,8 +256,8 @@ export default function SCMObservationalTab({ schema, onAddVariable, onDeleteVar
               <NewVariablePanel
                 existingVariables={variables}
                 onCancel={() => setShowNewVariable(false)}
-                onAdd={(newVar) => {
-                  onAddVariable(newVar);
+                onAdd={(newVar, childIds) => {
+                  onAddVariable(newVar, childIds);
                   setShowNewVariable(false);
                 }}
               />

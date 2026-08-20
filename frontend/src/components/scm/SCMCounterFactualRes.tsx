@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { InlineMath } from "react-katex";
-import { Edit2, Share2Icon, Lock, Search } from "lucide-react";
+import { Edit2, Share2Icon, Lock, Search, X } from "lucide-react";
 import ComparisonHistogram from "@/components/scm/plots/OverlayedHistogram";
 import { sampleScmSchema, type SCMVariableResult } from "@/lib/api";
 import type { SCMSchema } from "@/types";
@@ -10,6 +10,7 @@ import TreatmentResponse from "./plots/TreatmentResponse";
 import ComputationTrace from "./plots/ComputationTrace";
 import EditQueryPanel from "./widgets/EditQuery";
 import SCMDAGView from "./widgets/SCMDAGView";
+import ResizablePanels from "./widgets/ResizablePanels";
 
 interface SCMCounterfactualResultProps {
   schema: SCMSchema;
@@ -20,23 +21,27 @@ interface SCMCounterfactualResultProps {
   interveneValue: number;
   queryId: string;
   onQueryChange: (interveneId: string, interveneValue: number, queryId: string) => void;
+  onDeleteQuery: () => void;
 }
 
 // handles latex code for query
+const ESCAPE_LATEX_TEXT = /([\\%#&$_{}~^])/g;
+const escapeLatexText = (name: string) => name.replace(ESCAPE_LATEX_TEXT, "\\$1");
+
 const toLatexSubscript = (name: string) => {
   const SUBSCRIPT_MAP: Record<string, string> = {
     "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
     "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
   };
   const match = name.match(/^([A-Za-z]+)([₀₁₂₃₄₅₆₇₈₉]+)$/);
-  if (!match) return `\\text{${name}}`;
+  if (!match) return `\\text{${escapeLatexText(name)}}`;
   const [, base, subUnicode] = match;
   const subDigits = subUnicode.split("").map((c) => SUBSCRIPT_MAP[c] ?? c).join("");
   return `${base}_{${subDigits}}`;
 };
 
 export default function SCMCounterfactualResult({
-  schema, observedValues, abducedNoise, cfValues, interveneId, interveneValue, queryId, onQueryChange,
+  schema, observedValues, abducedNoise, cfValues, interveneId, interveneValue, queryId, onQueryChange, onDeleteQuery,
 }: SCMCounterfactualResultProps) {
   const variables = schema.variables;
   const edges = variables.flatMap((v) => v.dependencies.map((dep) => [dep, v.id] as [string, string]));
@@ -48,6 +53,7 @@ export default function SCMCounterfactualResult({
   const [intervenedResults, setIntervenedResults] = useState<Record<string, SCMVariableResult> | null>(null);
   const [loading, setLoading] = useState(false);
   const [editingQuery, setEditingQuery] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const OBSERVED_BORDER_FONT_COLOR = "#285E7B";
   const CF_BORDER_FONT_COLOR = "#BF9565";
@@ -73,7 +79,7 @@ export default function SCMCounterfactualResult({
   const cfDistResult = intervenedResults?.[queryId];
 
   const conditions = variables
-  .map((v) => `${toLatexSubscript(v.name)}=${observedValues[v.id]?.toFixed(1)}`)
+  .map((v) => `${toLatexSubscript(v.name)}=${observedValues[v.id]?.toFixed(1) ?? "?"}`)
   .join(", \\; ");
 
   const latexQuery = `\\mathbb{E}[${toLatexSubscript(queryVar?.name ?? "")}(${toLatexSubscript(interveneVar?.name ?? "")}=${interveneValue.toFixed(1)}) \\mid ${conditions}]`;
@@ -100,13 +106,54 @@ export default function SCMCounterfactualResult({
               <InlineMath math={latexQuery} />
             </span>
           </div>
-          <button
-            onClick={() => setEditingQuery((prev) => !prev)}
-            className="flex flex-shrink-0 items-center bg-white gap-1.5 rounded-md border px-3 py-1 text-[12px] font-semibold transition-colors hover:bg-orange-50"
-            style={{ borderColor: CF_BORDER_FONT_COLOR, color: CF_BORDER_FONT_COLOR }}
-          >
-            Edit Query <Edit2 size={12} />
-          </button>
+          <div className="relative flex flex-shrink-0 items-center gap-2">
+            <button
+              onClick={() => {
+                setEditingQuery(false);
+                setShowDeleteConfirm(true);
+              }}
+              title="Delete query"
+              aria-label="Delete query"
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-rose-400 bg-white text-rose-500 transition-colors hover:bg-rose-50"
+            >
+              <X size={13} />
+            </button>
+            <button
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                setEditingQuery(true);
+              }}
+              className="flex flex-shrink-0 items-center bg-white gap-1.5 rounded-md border px-3 py-1 text-[12px] font-semibold transition-colors hover:bg-orange-50"
+              style={{ borderColor: CF_BORDER_FONT_COLOR, color: CF_BORDER_FONT_COLOR }}
+            >
+              Edit Query <Edit2 size={12} />
+            </button>
+
+            {showDeleteConfirm && (
+              <div className="absolute right-0 top-full z-40 mt-4 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                <p className="mb-3 text-[12.5px] text-slate-600">
+                  Delete this counterfactual query? This will clear the result and take you back to the beginning.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 rounded-md border border-slate-200 py-1.5 text-[12px] font-semibold text-slate-500 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      onDeleteQuery();
+                      setShowDeleteConfirm(false);
+                    }}
+                    className="flex-1 rounded-md border border-rose-200 bg-rose-50 py-1.5 text-[12px] font-semibold text-rose-600 hover:bg-rose-100"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {editingQuery && (
@@ -127,7 +174,7 @@ export default function SCMCounterfactualResult({
         )}
       </div>
 
-      <div className="grid flex-1 min-h-0 grid-cols-[360px_1fr_410px] divide-x divide-slate-200">
+      <ResizablePanels className="flex-1 min-h-0 w-full" initialRightWidth={410} minRightWidth={360}>
         {/* SCM -> highlighting intervened on variable vs target variable*/}
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
           <div className="flex h-[45px] flex-shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4">
@@ -330,7 +377,7 @@ export default function SCMCounterfactualResult({
 
           </div>
         </div>
-        </div>
+        </ResizablePanels>
 
       {/* footer */}
       <div className="grid flex-shrink-0 grid-cols-3 divide-x divide-slate-200 border-t border-slate-200">

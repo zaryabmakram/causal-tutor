@@ -7,25 +7,48 @@ import SCMCounterfactualResult from "@/components/scm/SCMCounterFactualRes";
 import type { SCMSchema } from "@/types";
 import SCMDAGView from "./widgets/SCMDAGView";
 
+export interface CounterfactualSession {
+  inputs: Record<string, string>;
+  abduction: AbductionResult | null;
+  interveneId: string;
+  newValue: string;
+  queryId: string;
+  cfResult: Record<string, number> | null;
+}
+
 interface SCMCounterfactualTabProps {
   schema: SCMSchema;
+  session?: CounterfactualSession | null;
+  onSessionChange?: (session: CounterfactualSession) => void;
   onContextChange?: (ctx: any) => void;
 }
 
-export default function SCMCounterfactualTab({ schema, onContextChange }: SCMCounterfactualTabProps) {
+export default function SCMCounterfactualTab({ schema, session, onSessionChange, onContextChange }: SCMCounterfactualTabProps) {
   const variables = schema.variables;
 
-  const [inputs, setInputs] = useState<Record<string, string>>({});
-  const [abduction, setAbduction] = useState<AbductionResult | null>(null);
+  const [inputs, setInputs] = useState<Record<string, string>>(session?.inputs ?? {});
+  const [abduction, setAbduction] = useState<AbductionResult | null>(session?.abduction ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [buildingQuery, setBuildingQuery] = useState(false);
-  const [interveneId, setInterveneId] = useState(variables[0]?.id ?? "");
-  const [newValue, setNewValue] = useState("");
-  const [queryId, setQueryId] = useState(variables[variables.length - 1]?.id ?? "");
-  const [cfResult, setCfResult] = useState<Record<string, number> | null>(null);
+  const [interveneId, setInterveneId] = useState(session?.interveneId ?? variables[0]?.id ?? "");
+  const [newValue, setNewValue] = useState(session?.newValue ?? "");
+  const [queryId, setQueryId] = useState(session?.queryId ?? variables[variables.length - 1]?.id ?? "");
+  const [cfResult, setCfResult] = useState<Record<string, number> | null>(session?.cfResult ?? null);
   const [cfLoading, setCfLoading] = useState(false);
+
+  useEffect(() => {
+    if (!onSessionChange) return;
+    onSessionChange({
+      inputs,
+      abduction,
+      interveneId,
+      newValue,
+      queryId,
+      cfResult,
+    });
+  }, [inputs, abduction, interveneId, newValue, queryId, cfResult, onSessionChange]);
 
   // define observed colors (blue) vs counterfactual (tan) to keep consistent
   const OBSERVED_BORDER_FONT_COLOR = "#285E7B";
@@ -175,6 +198,11 @@ export default function SCMCounterfactualTab({ schema, onContextChange }: SCMCou
           } catch (err) {
             console.error(err);
           }
+        }}
+        onDeleteQuery={() => {
+          setAbduction(null);
+          setCfResult(null);
+          setBuildingQuery(false);
         }}
       />
     );

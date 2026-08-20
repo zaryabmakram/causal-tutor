@@ -73,6 +73,12 @@ _OPENAI_TO_OPENROUTER = {
     "gpt-4o-mini": "openai/gpt-4o-mini",
 }
 
+_OPENROUTER_TO_OPENAI = {v: k for k, v in _OPENAI_TO_OPENROUTER.items()}
+_MODEL_IDS = {
+    provider: {option["id"] for option in options}
+    for provider, options in _MODEL_OPTIONS.items()
+}
+
 
 @dataclass(frozen=True)
 class LLMRequestContext:
@@ -109,6 +115,23 @@ def resolve_model(
 ) -> str:
     explicit = (requested_model or "").strip()
     if explicit:
+        if provider == "openrouter":
+            # If the browser has an OpenAI model id cached while OpenRouter is
+            # selected, translate it to the equivalent OpenRouter id.
+            if explicit in _OPENAI_TO_OPENROUTER:
+                return _OPENAI_TO_OPENROUTER[explicit]
+            return explicit
+
+        # If the browser has an OpenRouter OpenAI-family id cached while the
+        # OpenAI provider is selected, translate it back. Non-OpenAI
+        # OpenRouter ids (anthropic/..., google/..., etc.) are not valid for
+        # OpenAI and must fall back to a known OpenAI model.
+        if explicit in _MODEL_IDS["openai"]:
+            return explicit
+        if explicit in _OPENROUTER_TO_OPENAI:
+            return _OPENROUTER_TO_OPENAI[explicit]
+        if "/" in explicit:
+            return default_model_for(provider, fallback_openai_model=fallback_openai_model)
         return explicit
     return default_model_for(provider, fallback_openai_model=fallback_openai_model)
 

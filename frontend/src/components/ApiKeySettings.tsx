@@ -66,7 +66,11 @@ export default function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps)
     const cfg = availableProviders.find((p) => p.id === nextProvider);
     const savedKey = getStoredKey(nextProvider);
     const savedSelectedModel = getStoredModel(nextProvider);
-    const fallbackModel = savedSelectedModel || cfg?.default_model || cfg?.models?.[0]?.id || "";
+    const modelIds = new Set((cfg?.models || []).map((m) => m.id));
+    const fallbackModel =
+      savedSelectedModel && modelIds.has(savedSelectedModel)
+        ? savedSelectedModel
+        : cfg?.default_model || cfg?.models?.[0]?.id || "";
 
     setProvider(nextProvider);
     setInput(savedKey || cfg?.env_api_key || "");
